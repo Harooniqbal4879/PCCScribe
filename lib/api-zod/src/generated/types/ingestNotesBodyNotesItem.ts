@@ -13,4 +13,8 @@ export type IngestNotesBodyNotesItem = {
   author?: string | null;
   content: string;
   sourceUrl?: string | null;
+  /** URL of the PCC print view for this note */
+  printUrl?: string | null;
+  /** Original PCC note type label verbatim */
+  noteTypePcc?: string | null;
 };

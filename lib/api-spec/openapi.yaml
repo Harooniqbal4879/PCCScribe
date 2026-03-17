@@ -542,6 +542,14 @@ components:
         sourceUrl:
           type: string
           nullable: true
+        printUrl:
+          type: string
+          nullable: true
+          description: Direct URL to the PCC print/full-view page for this note
+        noteTypePcc:
+          type: string
+          nullable: true
+          description: Original PCC note type label (e.g. "Nurse Practitioner Narrative/Physician Assistant")
         createdAt:
           type: string
       required:
@@ -583,6 +591,14 @@ components:
               sourceUrl:
                 type: string
                 nullable: true
+              printUrl:
+                type: string
+                nullable: true
+                description: URL of the PCC print view for this note
+              noteTypePcc:
+                type: string
+                nullable: true
+                description: Original PCC note type label verbatim
             required:
               - noteType
               - noteDate

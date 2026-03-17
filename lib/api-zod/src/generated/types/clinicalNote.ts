@@ -15,5 +15,9 @@ export interface ClinicalNote {
   author?: string | null;
   content: string;
   sourceUrl?: string | null;
+  /** Direct URL to the PCC print/full-view page for this note */
+  printUrl?: string | null;
+  /** Original PCC note type label (e.g. "Nurse Practitioner Narrative/Physician Assistant") */
+  noteTypePcc?: string | null;
   createdAt: string;
 }

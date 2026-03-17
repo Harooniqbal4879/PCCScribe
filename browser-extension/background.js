@@ -48,6 +48,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === "FETCH_NOTE_CONTENT") {
+    handleFetchNoteContent(message.payload.printUrl).then(sendResponse).catch((err) => {
+      sendResponse({ success: false, error: err.message });
+    });
+    return true;
+  }
 });
 
 async function handleCheckConnection() {
@@ -92,6 +99,70 @@ async function handleCreatePatient(patientData) {
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+// ── Open PCC print URL in a hidden tab, extract full text, close tab ─────────
+// The print page is same-origin (app.pointclickcare.com) so scripting is allowed.
+async function handleFetchNoteContent(printUrl) {
+  return new Promise((resolve) => {
+    chrome.tabs.create({ url: printUrl, active: false }, (tab) => {
+      const tabId = tab.id;
+      const TIMEOUT_MS = 20000;
+
+      function cleanup(result) {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearTimeout(timer);
+        chrome.tabs.remove(tabId, () => {});
+        resolve(result);
+      }
+
+      const timer = setTimeout(() => {
+        cleanup({ success: false, error: "Timed out loading print view" });
+      }, TIMEOUT_MS);
+
+      function onUpdated(updatedTabId, changeInfo) {
+        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+        chrome.scripting.executeScript(
+          {
+            target: { tabId },
+            func: () => {
+              // Remove script/style/nav/header elements then grab all visible text
+              try {
+                const clone = document.body.cloneNode(true);
+                clone.querySelectorAll(
+                  "script, style, noscript, nav, header, footer, .navbar, #navbar, .menu, [class*='nav']"
+                ).forEach((el) => el.remove());
+
+                // Try to find a dedicated note content area first
+                const contentArea =
+                  clone.querySelector(".note-content") ||
+                  clone.querySelector(".noteContent") ||
+                  clone.querySelector(".print-content") ||
+                  clone.querySelector("form") ||
+                  clone.querySelector("table") ||
+                  clone;
+
+                const text = (contentArea.innerText || contentArea.textContent || "").trim();
+                return { text, url: window.location.href };
+              } catch (e) {
+                return { text: document.body.innerText.trim(), url: window.location.href };
+              }
+            },
+          },
+          (results) => {
+            if (chrome.runtime.lastError || !results?.[0]?.result) {
+              cleanup({ success: false, error: chrome.runtime.lastError?.message || "Script execution failed" });
+            } else {
+              const { text, url } = results[0].result;
+              cleanup({ success: true, content: text, finalUrl: url });
+            }
+          }
+        );
+      }
+
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
+  });
 }
 
 async function handleSyncPatient(patientData) {

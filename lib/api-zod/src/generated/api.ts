@@ -282,6 +282,16 @@ export const ListPatientNotesResponseItem = zod.object({
   author: zod.string().nullish(),
   content: zod.string(),
   sourceUrl: zod.string().nullish(),
+  printUrl: zod
+    .string()
+    .nullish()
+    .describe("Direct URL to the PCC print\/full-view page for this note"),
+  noteTypePcc: zod
+    .string()
+    .nullish()
+    .describe(
+      'Original PCC note type label (e.g. \"Nurse Practitioner Narrative\/Physician Assistant\")',
+    ),
   createdAt: zod.string(),
 });
 export const ListPatientNotesResponse = zod.array(ListPatientNotesResponseItem);
@@ -314,6 +324,14 @@ export const CreatePatientNotesBody = zod.object({
       author: zod.string().nullish(),
       content: zod.string(),
       sourceUrl: zod.string().nullish(),
+      printUrl: zod
+        .string()
+        .nullish()
+        .describe("URL of the PCC print view for this note"),
+      noteTypePcc: zod
+        .string()
+        .nullish()
+        .describe("Original PCC note type label verbatim"),
     }),
   ),
   source: zod

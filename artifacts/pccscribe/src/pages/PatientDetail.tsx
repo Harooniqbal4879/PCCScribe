@@ -447,9 +447,9 @@ export default function PatientDetail() {
                       {notes?.map((note) => (
                         <div key={note.id} className="p-5 hover:bg-slate-50/50 transition-colors">
                           <div className="flex items-start justify-between mb-2">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center flex-wrap gap-2">
                               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-medium">
-                                {formatNoteType(note.noteType)}
+                                {(note as any).noteTypePcc || formatNoteType(note.noteType)}
                               </Badge>
                               {note.sourceUrl && (
                                 <Badge
@@ -457,6 +457,14 @@ export default function PatientDetail() {
                                   className="bg-indigo-50 text-indigo-700 border-indigo-200 flex items-center gap-1 px-1.5"
                                 >
                                   <Puzzle className="w-3 h-3" /> Extension
+                                </Badge>
+                              )}
+                              {(note as any).printUrl && (
+                                <Badge
+                                  variant="secondary"
+                                  className="bg-emerald-50 text-emerald-700 border-emerald-200 flex items-center gap-1 px-1.5"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" /> Full text
                                 </Badge>
                               )}
                             </div>

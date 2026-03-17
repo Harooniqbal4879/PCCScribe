@@ -388,43 +388,137 @@
 
   // ─── Note Content Extraction ────────────────────────────────────────────────
 
+  // ── Map PCC note type labels to our normalized enum values ──────────────────
+  function mapPccNoteType(label) {
+    if (!label) return null;
+    const t = label.toLowerCase();
+    if (t.includes("emar") || t.includes("medication administration")) return "mar";
+    if (t.includes("progress") || t.includes("narrative") || t.includes("health status") ||
+        t.includes("respiratory") || t.includes("nurse practitioner") || t.includes("physician assistant")) return "progress_notes";
+    if (t.includes("physician order") || t.includes("physician's order")) return "physician_orders";
+    if (t.includes("therapy") || t.includes("rehab") || t.includes("pt ") || t.includes("ot ") || t.includes("st ")) return "therapy_notes";
+    if (t.includes("dietary") || t.includes("nutrition")) return "dietary_notes";
+    if (t.includes("social work") || t.includes("social service")) return "social_work_notes";
+    if (t.includes("nursing")) return "nursing_notes";
+    if (t.includes("mds") || t.includes("minimum data set")) return "mds_assessment";
+    if (t.includes("care plan")) return "care_plan";
+    return null;
+  }
+
+  // ── Extract the print URL from an anchor element ─────────────────────────────
+  function getPrintUrl(anchor) {
+    if (!anchor) return null;
+    const href = anchor.getAttribute("href") || "";
+    // Direct URL (not javascript: and not bare #)
+    if (href && !href.startsWith("javascript") && href !== "#" &&
+        !href.endsWith("#") && href !== window.location.href) {
+      return href.startsWith("http") ? href : window.location.origin + href;
+    }
+    // onclick: window.open('/path', ...) or openWindow('/path', ...)
+    const onclick = anchor.getAttribute("onclick") || anchor.getAttribute("href") || "";
+    const winOpen = onclick.match(/(?:window\.open|openWindow)\s*\(\s*['"]([^'"]+)['"]/i);
+    if (winOpen) {
+      const u = winOpen[1];
+      return u.startsWith("http") ? u : window.location.origin + u;
+    }
+    // onclick: printNote('/path')
+    const fn = onclick.match(/(?:printNote|printView|viewPrint)\s*\(\s*['"]([^'"]+)['"]/i);
+    if (fn) {
+      const u = fn[1];
+      return u.startsWith("http") ? u : window.location.origin + u;
+    }
+    return null;
+  }
+
+  // ── Parse the PCC Progress Notes / Practitioner Notes table ─────────────────
+  // Columns (observed from PCC DOM):
+  //   [0] view | print links
+  //   [1] Effective Date (MM/DD/YYYY HH:MM)
+  //   [2] Type (note type label)
+  //   [3] Note (truncated content)
+  //   [4] Care Plan Item or Task
+  //   [5] Dept.
+  //   [6] Shift Report (Y/N)
+  //   [7] 24 Hour Report (Y/N)
   function extractNoteRows() {
     const notes = [];
     const today = new Date().toISOString().slice(0, 10);
-    const noteType = detectNoteType();
+    const pageNoteType = detectNoteType();
 
-    // PCC note rows in tables
-    const rowSelectors = [
-      "tr[data-note-id]", ".note-row", ".progress-note-row",
-      ".note-entry", "[class*='noteRow']", "[class*='note-item']",
-    ];
+    const allTrs = Array.from(document.querySelectorAll("tr"));
+    const MAX_NOTES = 25; // safety cap
 
-    let rows = [];
-    for (const sel of rowSelectors) {
-      const found = document.querySelectorAll(sel);
-      if (found.length > 0) { rows = Array.from(found); break; }
-    }
+    for (const tr of allTrs) {
+      if (notes.length >= MAX_NOTES) break;
 
-    if (rows.length > 0) {
-      rows.forEach((row) => {
-        const cells = row.querySelectorAll("td");
-        let noteDate = today, author = null, content = "";
-        cells.forEach((cell, i) => {
-          const text = cell.textContent.trim();
-          if (i === 0 && /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(text)) {
-            const parsed = parseMDY(text);
-            if (parsed) noteDate = parsed;
-          } else if (i === 1 && text.length > 1 && text.length < 60) {
-            author = text;
-          } else if (text.length > 20) {
-            content += text + "\n";
-          }
-        });
-        if (content.trim().length > 10) notes.push({ noteType, noteDate, author, content: content.trim() });
+      const anchors = Array.from(tr.querySelectorAll("a"));
+      const printAnchor = anchors.find(
+        (a) => a.textContent.trim().toLowerCase() === "print"
+      );
+      if (!printAnchor) continue;
+
+      const printUrl = getPrintUrl(printAnchor);
+      const cells = Array.from(tr.querySelectorAll("td"));
+      if (cells.length < 3) continue;
+
+      // Cell 0: the view/print links column — skip it for text
+      // Cell 1: date/time
+      // Cell 2: note type label
+      // Cell 3: truncated content
+      // Cell 5 (approx): dept / author
+      let noteDate = today;
+      let noteTypePcc = "";
+      let truncatedContent = "";
+      let author = "";
+
+      cells.forEach((cell, i) => {
+        const text = cell.textContent.trim();
+        if (i === 0) return; // view/print links
+
+        // Date pattern: MM/DD/YYYY HH:MM
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}/.test(text)) {
+          const datePart = text.split(/\s+/)[0];
+          const parsed = parseMDY(datePart);
+          if (parsed) noteDate = parsed;
+          return;
+        }
+
+        // Note type: medium-length, no numerics at start, not the truncated note
+        if (!noteTypePcc && text.length > 5 && text.length < 90 &&
+            !/^\d/.test(text) && !text.includes("SERVICE DATE") &&
+            !["Y", "N", "view", "print"].includes(text)) {
+          noteTypePcc = text;
+          return;
+        }
+
+        // Content (longer text) — skip if it looks like a dept code
+        if (!truncatedContent && text.length > 20 &&
+            text !== noteTypePcc && !/^[A-Z]{1,10}$/.test(text)) {
+          truncatedContent = text;
+          return;
+        }
+
+        // Dept: short string towards the end of the row, not Y/N
+        if (!author && i >= 4 && text.length > 1 && text.length < 20 &&
+            !["Y", "N"].includes(text) && !/^\d/.test(text)) {
+          author = text;
+        }
+      });
+
+      const mappedType = mapPccNoteType(noteTypePcc) || pageNoteType;
+
+      notes.push({
+        noteType: mappedType,
+        noteTypePcc: noteTypePcc || null,
+        noteDate,
+        author: author || null,
+        content: truncatedContent || noteTypePcc || "Note content pending full extraction",
+        printUrl: printUrl || null,
+        sourceUrl: window.location.href,
       });
     }
 
-    // Fallback: grab page body text as a single note
+    // Fallback: no print links found — grab any note-like content areas
     if (notes.length === 0) {
       const contentSelectors = [
         ".note-content", ".note-text", ".clinical-note", "[class*='noteContent']",
@@ -435,7 +529,15 @@
         if (el) {
           const text = el.innerText.trim();
           if (text.length > 50) {
-            notes.push({ noteType, noteDate: today, author: null, content: text });
+            notes.push({
+              noteType: pageNoteType,
+              noteTypePcc: null,
+              noteDate: today,
+              author: null,
+              content: text,
+              printUrl: null,
+              sourceUrl: window.location.href,
+            });
             break;
           }
         }
@@ -819,13 +921,17 @@
         : "Page content will be captured as a note";
     }
     if (listEl && detectedNotes.length > 0) {
-      listEl.innerHTML = detectedNotes.slice(0, 3).map(n =>
+      listEl.innerHTML = detectedNotes.slice(0, 4).map(n =>
         `<div class="pccscribe-note-preview-item">
-          <span class="pccscribe-note-date">${n.noteDate}</span>
-          ${n.author ? `<span class="pccscribe-note-author">${n.author}</span>` : ""}
-          <div class="pccscribe-note-snippet">${n.content.substring(0, 120)}…</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">
+            <span class="pccscribe-note-date">${n.noteDate}</span>
+            ${n.author ? `<span class="pccscribe-note-author">${n.author}</span>` : ""}
+            ${n.printUrl ? `<span style="font-size:10px;color:#059669;font-weight:600;">● Full</span>` : `<span style="font-size:10px;color:#f59e0b;font-weight:600;">● Truncated</span>`}
+          </div>
+          ${n.noteTypePcc ? `<div style="font-size:10px;color:#6366f1;margin-bottom:2px;font-weight:500;">${n.noteTypePcc}</div>` : ""}
+          <div class="pccscribe-note-snippet">${n.content.substring(0, 100)}…</div>
          </div>`
-      ).join("") + (detectedNotes.length > 3 ? `<div class="pccscribe-more">+${detectedNotes.length - 3} more</div>` : "");
+      ).join("") + (detectedNotes.length > 4 ? `<div class="pccscribe-more">+${detectedNotes.length - 4} more</div>` : "");
     }
 
     // 3. Load patients from PCCScribe
@@ -871,34 +977,61 @@
     if (!select?.value) return;
 
     const patientId = parseInt(select.value);
-    const noteType = noteTypeSelect?.value || detectNoteType();
-    let notesToSend = detectedNotes.map(n => ({ ...n, noteType }));
-    if (notesToSend.length === 0) {
-      notesToSend = [{
-        noteType,
-        noteDate: new Date().toISOString().slice(0, 10),
-        author: null,
-        content: document.body.innerText.trim().substring(0, 10000),
-        sourceUrl: window.location.href,
-      }];
-    } else {
-      notesToSend = notesToSend.map(n => ({ ...n, sourceUrl: window.location.href }));
-    }
+    const chosenNoteType = noteTypeSelect?.value || detectNoteType();
+
+    let notesToSend = detectedNotes.length > 0
+      ? detectedNotes.map(n => ({ ...n, noteType: chosenNoteType }))
+      : [{
+          noteType: chosenNoteType,
+          noteTypePcc: null,
+          noteDate: new Date().toISOString().slice(0, 10),
+          author: null,
+          content: document.body.innerText.trim().substring(0, 10000),
+          printUrl: null,
+          sourceUrl: window.location.href,
+        }];
 
     syncBtn.disabled = true;
-    syncBtn.textContent = "Syncing...";
-    setStatus("Sending notes to PCCScribe...", "info");
+    syncBtn.textContent = "Fetching...";
+
+    // ── Step 1: Fetch full content from each print URL ────────────────────────
+    const notesWithPrintUrls = notesToSend.filter(n => n.printUrl);
+    const notesWithoutPrintUrls = notesToSend.filter(n => !n.printUrl);
+
+    const enrichedNotes = [...notesWithoutPrintUrls];
+
+    for (let i = 0; i < notesWithPrintUrls.length; i++) {
+      const note = notesWithPrintUrls[i];
+      setStatus(`Fetching note ${i + 1} of ${notesWithPrintUrls.length}...`, "info");
+      syncBtn.textContent = `Fetching ${i + 1}/${notesWithPrintUrls.length}...`;
+
+      const result = await chrome.runtime.sendMessage({
+        type: "FETCH_NOTE_CONTENT",
+        payload: { printUrl: note.printUrl },
+      });
+
+      if (result.success && result.content && result.content.length > 20) {
+        enrichedNotes.push({ ...note, content: result.content });
+      } else {
+        // Fall back to truncated content if print fetch fails
+        enrichedNotes.push(note);
+      }
+    }
+
+    // ── Step 2: Send all enriched notes to the API ───────────────────────────
+    setStatus(`Saving ${enrichedNotes.length} note(s)...`, "info");
+    syncBtn.textContent = "Saving...";
 
     const result = await chrome.runtime.sendMessage({
       type: "SEND_NOTES",
-      payload: { patientId, notes: notesToSend },
+      payload: { patientId, notes: enrichedNotes },
     });
 
     syncBtn.disabled = false;
     syncBtn.textContent = "Fetch & Sync Notes";
 
     if (result.success) {
-      setStatus(`✓ ${result.inserted} note(s) synced!`, "success");
+      setStatus(`✓ ${result.inserted} note(s) synced with full content!`, "success");
     } else {
       setStatus("Error: " + (result.error || "Unknown error"), "error");
     }

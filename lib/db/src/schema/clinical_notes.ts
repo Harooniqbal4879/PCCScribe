@@ -28,6 +28,8 @@ export const clinicalNotesTable = pgTable("clinical_notes", {
   author: text("author"),
   content: text("content").notNull(),
   sourceUrl: text("source_url"),
+  printUrl: text("print_url"),
+  noteTypePcc: text("note_type_pcc"),
   source: text("source").default("manual").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

@@ -46,6 +46,8 @@ router.post("/", async (req, res) => {
           author: note.author ?? null,
           content: note.content,
           sourceUrl: note.sourceUrl ?? null,
+          printUrl: (note as any).printUrl ?? null,
+          noteTypePcc: (note as any).noteTypePcc ?? null,
           source,
         }))
       )

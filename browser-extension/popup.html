@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCCScribe</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="popup-header">
+      <div class="popup-logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.17 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.11 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 5.96 5.96l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg>
+        PCCScribe
+      </div>
+      <button class="settings-btn" id="settingsBtn" title="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41M19.07 19.07l-1.41-1.41M12 2v2M12 20v2M2 12H4M20 12h2"/></svg>
+      </button>
+    </div>
+
+    <!-- Connection Status -->
+    <div class="status-bar" id="statusBar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Checking connection...</span>
+    </div>
+
+    <!-- Main Content -->
+    <div class="popup-body" id="mainContent">
+      <!-- PCC Page Detection -->
+      <div class="section" id="pccSection">
+        <div class="section-label">Current Page</div>
+        <div class="page-info" id="pageInfo">
+          <span id="pageIcon">🔍</span>
+          <span id="pageName">Not on a PCC page</span>
+        </div>
+        <button class="btn-primary" id="openPCCBtn">Open PointClickCare</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- On PCC page -->
+      <div id="pccActiveSection" style="display:none">
+        <div class="section-label">Detected Patient</div>
+        <div class="patient-chip" id="detectedPatient">—</div>
+        <button class="btn-primary" id="openPanelBtn">Open Sync Panel on Page</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Quick Links -->
+      <div class="quick-links">
+        <a href="#" id="openAppBtn" class="quick-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Open PCCScribe App
+        </a>
+        <a href="#" id="helpBtn" class="quick-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Help &amp; Setup
+        </a>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="popup-body" id="settingsContent" style="display:none">
+      <div class="section-label">PCCScribe API URL</div>
+      <input type="text" id="apiUrlInput" class="input-field" placeholder="https://your-app.replit.app/api" />
+      <p class="hint">Find this URL on the Extension page in your PCCScribe app.</p>
+      <button class="btn-primary" id="saveSettingsBtn">Save Settings</button>
+      <button class="btn-secondary" id="backBtn">← Back</button>
+      <div id="saveStatus" class="save-status"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,284 @@
+/* PCCScribe Content Script Styles */
+
+#pccscribe-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 50px;
+  padding: 10px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+  transition: box-shadow 0.2s, transform 0.2s;
+  letter-spacing: 0.01em;
+}
+
+#pccscribe-fab:hover {
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+  transform: translateY(-1px);
+}
+
+/* ── Panel ─────────────────────────────────────────────────────────────── */
+
+#pccscribe-panel {
+  position: fixed;
+  top: 0;
+  right: -380px;
+  width: 360px;
+  height: 100vh;
+  z-index: 2147483646;
+  background: #ffffff;
+  box-shadow: -4px 0 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+#pccscribe-panel.pccscribe-panel-open {
+  right: 0;
+}
+
+.pccscribe-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.pccscribe-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.pccscribe-close {
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #ffffff;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.pccscribe-close:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.pccscribe-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pccscribe-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.pccscribe-patient-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  padding: 8px 10px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+}
+
+.pccscribe-patient-name.pccscribe-undetected {
+  color: #9ca3af;
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.pccscribe-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 0;
+}
+
+.pccscribe-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #111827;
+  background: #ffffff;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+.pccscribe-select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.pccscribe-btn-primary {
+  width: 100%;
+  padding: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  margin-top: 4px;
+}
+
+.pccscribe-btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.pccscribe-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pccscribe-btn-secondary {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  color: #2563eb;
+  border: 1px dashed #93c5fd;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-top: 6px;
+}
+
+.pccscribe-btn-secondary:hover {
+  background: #eff6ff;
+}
+
+.pccscribe-preview-box {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.pccscribe-notes-count {
+  font-size: 12px;
+  color: #374151;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.pccscribe-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pccscribe-note-preview-item {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.pccscribe-note-date {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-right: 6px;
+}
+
+.pccscribe-note-author {
+  display: inline-block;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.pccscribe-note-snippet {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 4px;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.pccscribe-more {
+  font-size: 11px;
+  color: #6b7280;
+  text-align: center;
+  padding: 4px;
+}
+
+.pccscribe-status {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: center;
+  display: none;
+}
+
+.pccscribe-status:not(:empty) {
+  display: block;
+}
+
+.pccscribe-status-success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.pccscribe-status-error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.pccscribe-status-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}

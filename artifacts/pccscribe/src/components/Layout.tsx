@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Stethoscope, UserIcon, LogOut, Settings, Bell, LayoutDashboard } from "lucide-react";
+import { Stethoscope, UserIcon, LogOut, Settings, Bell, LayoutDashboard, Puzzle } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
@@ -34,6 +34,19 @@ export function Layout({ children }: { children: ReactNode }) {
                 <div className="flex items-center gap-2">
                   <LayoutDashboard className="w-4 h-4" />
                   Patients
+                </div>
+              </Link>
+              <Link 
+                href="/extension" 
+                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                  location === "/extension" 
+                    ? "bg-primary/10 text-primary" 
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Puzzle className="w-4 h-4" />
+                  Extension
                 </div>
               </Link>
             </nav>

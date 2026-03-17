@@ -168,10 +168,13 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="px-5 py-3 bg-white flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                        <Link
+                          href={`/patients/${patient.id}`}
+                          className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors py-1 px-2 rounded-md hover:bg-primary/5"
+                        >
                           <FileText className="w-3.5 h-3.5" />
                           View Records
-                        </div>
+                        </Link>
                         <Link
                           href={`/patients/${patient.id}`}
                           className="text-sm font-semibold text-primary hover:text-primary/80 transition-colors py-1 px-3 rounded-md hover:bg-primary/5"

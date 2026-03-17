@@ -252,6 +252,75 @@
   padding: 4px;
 }
 
+/* ── Create Patient Form ─────────────────────────────────────────────────── */
+
+.pccscribe-form-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #1d4ed8;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.pccscribe-input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  font-size: 12px;
+  color: #111827;
+  background: #ffffff;
+  outline: none;
+  margin-bottom: 6px;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.pccscribe-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.pccscribe-input::placeholder {
+  color: #9ca3af;
+}
+
+.pccscribe-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.pccscribe-row .pccscribe-input {
+  flex: 1;
+}
+
+.pccscribe-form-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.pccscribe-btn-ghost {
+  padding: 8px 10px;
+  background: transparent;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.pccscribe-btn-ghost:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+
 .pccscribe-status {
   font-size: 12px;
   font-weight: 500;

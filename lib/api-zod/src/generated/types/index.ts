@@ -30,3 +30,4 @@ export * from "./summarySoapSummaryObjectiveKeyFindingsItem";
 export * from "./summarySoapSummaryPlan";
 export * from "./summarySoapSummarySubjective";
 export * from "./summaryStatus";
+export * from "./syncPatientResponse";

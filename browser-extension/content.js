@@ -476,6 +476,7 @@
         <div>
           <div class="pccscribe-label">Detected Patient</div>
           <div id="pccscribe-detected-patient" class="pccscribe-patient-name">Scanning...</div>
+          <div id="pccscribe-sync-status" style="font-size:11px;margin-top:4px;color:#6b7280;min-height:14px;"></div>
         </div>
 
         <div class="pccscribe-divider"></div>
@@ -707,6 +708,70 @@
     if (panel) panel.classList.remove("pccscribe-panel-open");
   }
 
+  // ─── Auto-sync patient data to PCCScribe API ──────────────────────────────────
+  // Called automatically after each page scan. Silently upserts by pccDbId.
+  async function syncPatientToApi() {
+    if (!cachedPatientInfo.pccDbId) return; // can only sync if we have a PCC internal ID
+
+    const syncEl = document.getElementById("pccscribe-sync-status");
+    if (syncEl) {
+      syncEl.style.color = "#6b7280";
+      syncEl.textContent = "⏳ Syncing with PCCScribe...";
+    }
+
+    const payload = {
+      name: cachedPatientInfo.name || "Unknown",
+      age: cachedPatientInfo.age || 0,
+      facilityName: cachedPatientInfo.facility || "",
+      unit: cachedPatientInfo.unit || "",
+      pccInternalId: cachedPatientInfo.pccDbId,
+      ...(cachedPatientInfo.mrn ? { mrn: cachedPatientInfo.mrn } : {}),
+      ...(cachedPatientInfo.nickname ? { nickname: cachedPatientInfo.nickname } : {}),
+      ...(cachedPatientInfo.dob ? { dateOfBirth: cachedPatientInfo.dob } : {}),
+      ...(cachedPatientInfo.gender ? { gender: cachedPatientInfo.gender } : {}),
+      ...(cachedPatientInfo.status ? { admissionStatus: cachedPatientInfo.status } : {}),
+      ...(cachedPatientInfo.physician ? { physician: cachedPatientInfo.physician } : {}),
+      ...(cachedPatientInfo.allergies ? { allergies: cachedPatientInfo.allergies } : {}),
+      ...(cachedPatientInfo.codeStatus ? { codeStatus: cachedPatientInfo.codeStatus } : {}),
+      ...(cachedPatientInfo.specialInstructions ? { specialInstructions: cachedPatientInfo.specialInstructions } : {}),
+      ...(cachedPatientInfo.diet ? { diet: cachedPatientInfo.diet } : {}),
+      ...(cachedPatientInfo.admissionDate ? { admissionDate: cachedPatientInfo.admissionDate } : {}),
+      ...(cachedPatientInfo.initialAdmissionDate ? { initialAdmissionDate: cachedPatientInfo.initialAdmissionDate } : {}),
+      ...(cachedPatientInfo.enterpriseId ? { enterpriseId: cachedPatientInfo.enterpriseId } : {}),
+      ...(cachedPatientInfo.currentVitals ? { currentVitals: JSON.stringify(cachedPatientInfo.currentVitals) } : {}),
+      ...(cachedPatientInfo.emergencyContact ? { emergencyContact: cachedPatientInfo.emergencyContact } : {}),
+    };
+
+    // Don't sync if we don't have the minimum required fields
+    if (!payload.name || payload.name === "Unknown" || !payload.facilityName || !payload.unit) return;
+
+    const result = await chrome.runtime.sendMessage({ type: "SYNC_PATIENT", payload });
+
+    if (syncEl) {
+      if (result.success) {
+        const label = result.created ? "✓ Added to PCCScribe" : "✓ Patient data synced";
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        syncEl.style.color = result.created ? "#059669" : "#6b7280";
+        syncEl.textContent = `${label} · ${ts}`;
+
+        // If the patient was just created, refresh the patient list so they appear in the dropdown
+        if (result.created && result.patient) {
+          patients.push(result.patient);
+          const select = document.getElementById("pccscribe-patient-select");
+          if (select && select.querySelector(`option[value="${result.patient.id}"]`) === null) {
+            const opt = document.createElement("option");
+            opt.value = String(result.patient.id);
+            opt.textContent = `${result.patient.name} (${result.patient.age} yrs · ${result.patient.mrn || "No MRN"})`;
+            select.appendChild(opt);
+          }
+        }
+      } else {
+        syncEl.style.color = "#dc2626";
+        syncEl.textContent = `⚠ Sync failed: ${result.error || "unknown error"}`;
+      }
+    }
+  }
+
   async function scanPage() {
     // 1. Detect patient from PCC DOM
     cachedPatientInfo = detectPatientInfo();
@@ -729,9 +794,14 @@
         ].filter(Boolean).join(" · ");
         patientEl.innerHTML = `<strong>${displayName}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}${subLine2 ? `<br><span style="font-size:11px;color:#9ca3af;font-weight:400;">${subLine2}</span>` : ""}`;
         patientEl.classList.remove("pccscribe-undetected");
+
+        // Auto-sync to API in the background (non-blocking)
+        syncPatientToApi();
       } else {
         patientEl.textContent = "Patient not detected — open a patient chart";
         patientEl.classList.add("pccscribe-undetected");
+        const syncEl = document.getElementById("pccscribe-sync-status");
+        if (syncEl) syncEl.textContent = "";
       }
     }
 

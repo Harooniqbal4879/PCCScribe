@@ -26,6 +26,7 @@ import type {
   IngestNotesBody,
   Patient,
   Summary,
+  SyncPatientResponse,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -272,6 +273,94 @@ export const useCreatePatient = <
   TContext
 > => {
   return useMutation(getCreatePatientMutationOptions(options));
+};
+
+/**
+ * Creates a new patient or updates an existing one matched by pccInternalId. Called automatically by the browser extension on each patient page visit to keep vitals, allergies, and clinical data current without manual input.
+
+ * @summary Upsert patient by PCC internal ID
+ */
+export const getSyncPatientUrl = () => {
+  return `/api/patients/sync`;
+};
+
+export const syncPatient = async (
+  createPatientBody: CreatePatientBody,
+  options?: RequestInit,
+): Promise<SyncPatientResponse> => {
+  return customFetch<SyncPatientResponse>(getSyncPatientUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPatientBody),
+  });
+};
+
+export const getSyncPatientMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncPatient>>,
+    TError,
+    { data: BodyType<CreatePatientBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof syncPatient>>,
+  TError,
+  { data: BodyType<CreatePatientBody> },
+  TContext
+> => {
+  const mutationKey = ["syncPatient"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof syncPatient>>,
+    { data: BodyType<CreatePatientBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return syncPatient(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SyncPatientMutationResult = NonNullable<
+  Awaited<ReturnType<typeof syncPatient>>
+>;
+export type SyncPatientMutationBody = BodyType<CreatePatientBody>;
+export type SyncPatientMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Upsert patient by PCC internal ID
+ */
+export const useSyncPatient = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncPatient>>,
+    TError,
+    { data: BodyType<CreatePatientBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof syncPatient>>,
+  TError,
+  { data: BodyType<CreatePatientBody> },
+  TContext
+> => {
+  return useMutation(getSyncPatientMutationOptions(options));
 };
 
 /**

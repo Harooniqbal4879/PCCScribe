@@ -41,6 +41,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === "SYNC_PATIENT") {
+    handleSyncPatient(message.payload).then(sendResponse).catch((err) => {
+      sendResponse({ success: false, error: err.message });
+    });
+    return true;
+  }
 });
 
 async function handleCheckConnection() {
@@ -82,6 +89,25 @@ async function handleCreatePatient(patientData) {
     }
     const patient = await response.json();
     return { success: true, patient };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleSyncPatient(patientData) {
+  const { apiUrl } = await getConfig();
+  try {
+    const response = await fetch(`${apiUrl}/patients/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patientData),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || `HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    return { success: true, patient: result.patient, created: result.created };
   } catch (err) {
     return { success: false, error: err.message };
   }

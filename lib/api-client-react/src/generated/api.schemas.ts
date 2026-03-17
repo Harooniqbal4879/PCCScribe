@@ -42,6 +42,12 @@ export interface Patient {
   updatedAt: string;
 }
 
+export interface SyncPatientResponse {
+  patient: Patient;
+  /** true if a new record was created, false if an existing one was updated */
+  created: boolean;
+}
+
 export interface CreatePatientBody {
   name: string;
   age: number;

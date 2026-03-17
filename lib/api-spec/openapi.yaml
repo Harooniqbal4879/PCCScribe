@@ -63,6 +63,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/Patient"
 
+  /patients/sync:
+    post:
+      operationId: syncPatient
+      tags: [patients]
+      summary: Upsert patient by PCC internal ID
+      description: >
+        Creates a new patient or updates an existing one matched by pccInternalId.
+        Called automatically by the browser extension on each patient page visit to
+        keep vitals, allergies, and clinical data current without manual input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePatientBody"
+      responses:
+        "200":
+          description: Existing patient updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPatientResponse"
+        "201":
+          description: New patient created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPatientResponse"
+        "400":
+          description: Validation error (pccInternalId required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /patients/{patientId}:
     get:
       operationId: getPatient
@@ -317,6 +352,18 @@ components:
           type: string
       required:
         - error
+
+    SyncPatientResponse:
+      type: object
+      properties:
+        patient:
+          $ref: "#/components/schemas/Patient"
+        created:
+          type: boolean
+          description: true if a new record was created, false if an existing one was updated
+      required:
+        - patient
+        - created
 
     Patient:
       type: object

@@ -80,6 +80,75 @@ export const CreatePatientBody = zod.object({
 });
 
 /**
+ * Creates a new patient or updates an existing one matched by pccInternalId. Called automatically by the browser extension on each patient page visit to keep vitals, allergies, and clinical data current without manual input.
+
+ * @summary Upsert patient by PCC internal ID
+ */
+export const SyncPatientBody = zod.object({
+  name: zod.string(),
+  age: zod.number(),
+  facilityName: zod.string(),
+  unit: zod.string(),
+  mrn: zod.string().nullish(),
+  admissionDate: zod.string().nullish(),
+  primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
+});
+
+export const SyncPatientResponse = zod.object({
+  patient: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    age: zod.number(),
+    facilityName: zod.string(),
+    unit: zod.string(),
+    mrn: zod.string().nullish(),
+    admissionDate: zod.string().nullish(),
+    primaryDiagnosis: zod.string().nullish(),
+    nickname: zod.string().nullish(),
+    dateOfBirth: zod.string().nullish(),
+    gender: zod.string().nullish(),
+    pccInternalId: zod.string().nullish(),
+    admissionStatus: zod.string().nullish(),
+    physician: zod.string().nullish(),
+    allergies: zod.string().nullish(),
+    codeStatus: zod.string().nullish(),
+    specialInstructions: zod.string().nullish(),
+    diet: zod.string().nullish(),
+    initialAdmissionDate: zod.string().nullish(),
+    enterpriseId: zod.string().nullish(),
+    currentVitals: zod
+      .string()
+      .nullish()
+      .describe("JSON string of current vitals object"),
+    emergencyContact: zod.string().nullish(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+  }),
+  created: zod
+    .boolean()
+    .describe(
+      "true if a new record was created, false if an existing one was updated",
+    ),
+});
+
+/**
  * @summary Get patient by ID
  */
 export const GetPatientParams = zod.object({

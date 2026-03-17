@@ -22,6 +22,7 @@
       unit: null,       // "2 - Bristol 218-B"
       facility: null,   // "Applewood Nursing Center"
       physician: null,  // "Salman Khan"
+      status: null,     // "Current"
     };
 
     // ── 1. PCC client ID from URL ─────────────────────────────────────────────
@@ -95,30 +96,67 @@
       if (nnOnclick) info.nickname = nnOnclick[1].trim();
     }
 
-    // ── 4. DOB, Age, Gender from rendered text ────────────────────────────────
-    const dobMatch = bodyText.match(/DOB[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
-    if (dobMatch) info.dob = parseMDY(dobMatch[1]);
+    // ── 4. Unit / Room / Bed — direct ID ──────────────────────────────────────
+    // <span id="res_unitRoomBed">2 - Bristol 230-A</span>
+    const unitEl = document.getElementById("res_unitRoomBed");
+    if (unitEl) info.unit = unitEl.innerText.trim();
 
-    // "Age: 76" or "Age 76"
-    const ageMatch = bodyText.match(/\bAge[:\s]+(\d{1,3})\b/i);
-    if (ageMatch) info.age = parseInt(ageMatch[1]);
+    // ── 5. Status — direct ID ─────────────────────────────────────────────────
+    // <span id="res_status">Current</span>
+    const statusEl = document.getElementById("res_status");
+    if (statusEl) info.status = statusEl.innerText.trim();
 
-    // "Gender: Female" — explicit label only (avoids false positives)
-    const gMatch = bodyText.match(/\bGender[:\s]+(Male|Female|Non-binary|Other)\b/i);
-    if (gMatch) info.gender = gMatch[1];
+    // ── 6. Gender, DOB, Age, Physician from .residentProfileDetails ───────────
+    // PCC wraps all of these in <td class="residentProfileDetails">
+    // Each field is in its own <p> tag inside that cell.
+    const profileCell = document.querySelector(".residentProfileDetails");
+    if (profileCell) {
+      const paragraphs = Array.from(profileCell.querySelectorAll("p"));
+      for (const p of paragraphs) {
+        const txt = p.innerText.replace(/\s+/g, " ").trim();
 
-    // ── 5. Physician ──────────────────────────────────────────────────────────
-    // PCC: "Physician: Salman Khan"  (label followed by name, terminated by newline)
-    const physMatch = bodyText.match(/\bPhysician[:\s]+([A-Z][A-Za-z\s\.\-']+?)(?:\r?\n|DOB|Gender|Status|Location|Edit)/m);
-    if (physMatch) info.physician = physMatch[1].trim().replace(/\s{2,}/g, " ");
+        // Gender / DOB / Age paragraph: "Gender: Female   DOB: 9/20/1950   Age: 75"
+        if (/Gender/i.test(txt)) {
+          const gm = txt.match(/Gender[:\s]*(Male|Female|Non-binary|Other)/i);
+          if (gm && !info.gender) info.gender = gm[1];
 
-    // ── 6. Unit / Location ────────────────────────────────────────────────────
-    // PCC: "Location: 2 - Bristol 218-B"
-    const locMatch = bodyText.match(/\bLocation[:\s]+([^\r\n]{3,60})/i);
-    if (locMatch) {
-      const loc = locMatch[1].trim();
-      // Skip pure UI labels
-      if (!/(select|choose|facility)/i.test(loc)) info.unit = loc;
+          const dm = txt.match(/DOB[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+          if (dm && !info.dob) info.dob = parseMDY(dm[1]);
+
+          const am = txt.match(/Age[:\s]*(\d{1,3})/i);
+          if (am && !info.age) info.age = parseInt(am[1]);
+        }
+
+        // Physician paragraph: "Physician: Ramy Alosachie"
+        if (/^Physician[:\s]/i.test(txt) && !info.physician) {
+          info.physician = txt.replace(/^Physician[:\s]*/i, "").trim();
+        }
+      }
+    }
+
+    // Fallback for DOB/Age/Gender/Physician if profileCell wasn't found
+    if (!info.dob) {
+      const m = bodyText.match(/DOB[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+      if (m) info.dob = parseMDY(m[1]);
+    }
+    if (!info.age) {
+      const m = bodyText.match(/\bAge[:\s]+(\d{1,3})\b/i);
+      if (m) info.age = parseInt(m[1]);
+    }
+    if (!info.gender) {
+      const m = bodyText.match(/\bGender[:\s]+(Male|Female|Non-binary|Other)\b/i);
+      if (m) info.gender = m[1];
+    }
+    if (!info.physician) {
+      const m = bodyText.match(/\bPhysician[:\s]+([A-Z][A-Za-z\s\.\-']+?)(?:\r?\n|DOB|Gender|Status|Location|Edit)/m);
+      if (m) info.physician = m[1].trim().replace(/\s{2,}/g, " ");
+    }
+    if (!info.unit) {
+      const m = bodyText.match(/\bLocation[:\s]+([^\r\n]{3,60})/i);
+      if (m) {
+        const loc = m[1].trim();
+        if (!/(select|choose|facility)/i.test(loc)) info.unit = loc;
+      }
     }
 
     // ── 7. Facility name — read from PCC's facilityProperties script tag ────────
@@ -516,10 +554,16 @@
           : cachedPatientInfo.name;
         const sub = [
           cachedPatientInfo.age ? `Age ${cachedPatientInfo.age}` : null,
+          cachedPatientInfo.gender || null,
           cachedPatientInfo.pccId ? `#${cachedPatientInfo.pccId}` : null,
+          cachedPatientInfo.unit || null,
           cachedPatientInfo.facility || null,
         ].filter(Boolean).join(" · ");
-        patientEl.innerHTML = `<strong>${displayName}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}`;
+        const subLine2 = [
+          cachedPatientInfo.status ? `Status: ${cachedPatientInfo.status}` : null,
+          cachedPatientInfo.physician ? `Dr. ${cachedPatientInfo.physician}` : null,
+        ].filter(Boolean).join(" · ");
+        patientEl.innerHTML = `<strong>${displayName}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}${subLine2 ? `<br><span style="font-size:11px;color:#9ca3af;font-weight:400;">${subLine2}</span>` : ""}`;
         patientEl.classList.remove("pccscribe-undetected");
       } else {
         patientEl.textContent = "Patient not detected — open a patient chart";

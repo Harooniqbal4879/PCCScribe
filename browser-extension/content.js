@@ -12,8 +12,10 @@
       name: null,       // "Patricia Abramczyk" (First Last)
       firstName: null,
       lastName: null,
-      mrn: null,
-      pccId: null,      // ESOLclientid from URL
+      nickname: null,   // "Val" — commonly known as
+      mrn: null,        // "PCC-9906"
+      pccId: null,      // chart/record number (e.g. 9906)
+      pccDbId: null,    // internal DB ID from displayCareProfile (e.g. 9490049)
       dob: null,        // "1949-11-15"
       age: null,        // 76
       gender: null,     // "Female"
@@ -27,31 +29,70 @@
     info.pccId = urlParams.get("ESOLclientid") || urlParams.get("clientId") || urlParams.get("id") || null;
     if (info.pccId) info.mrn = "PCC-" + info.pccId;
 
-    // ── 2. Rendered page text — avoids <script> tag content bleed-in ──────────
-    // innerText only includes visible rendered text, unlike textContent.
+    // ── 2. PRIMARY: displayCareProfile onclick attribute ──────────────────────
+    // PCC renders:  onclick="displayCareProfile(9490049,'Beavers, Valerie (9906)')"
+    // #careProfileResidentBtn is the Care Profile button on the patient header.
+    // This is the most reliable source: name + chart ID + internal DB ID, all in one attribute.
+    const careProfileBtn = document.querySelector(
+      '#careProfileResidentBtn, input[onclick*="displayCareProfile"], button[onclick*="displayCareProfile"]'
+    );
+    if (careProfileBtn) {
+      const onclick = careProfileBtn.getAttribute("onclick") || "";
+      // Match: displayCareProfile(dbId,'Last, First (chartId)')
+      const cpMatch = onclick.match(/displayCareProfile\(\s*(\d+)\s*,\s*['"]([^'"]+)['"]\s*\)/);
+      if (cpMatch) {
+        info.pccDbId = cpMatch[1];          // internal DB record ID (e.g. 9490049)
+        const nameStr = cpMatch[2];         // e.g. "Beavers, Valerie (9906)"
+
+        // Parse "Last, First (chartId)"
+        const nm = nameStr.match(/^([^,]+),\s+([^("]+?)\s*(?:\((\d+)\))?$/);
+        if (nm) {
+          info.lastName  = nm[1].trim();
+          info.firstName = nm[2].trim();
+          info.name      = `${info.firstName} ${info.lastName}`;
+          if (nm[3]) {
+            info.pccId = nm[3];             // chart number (e.g. 9906)
+            info.mrn   = "PCC-" + nm[3];
+          }
+        }
+      }
+    }
+
+    // ── 3. Rendered page text — avoids <script> tag content bleed-in ──────────
     const bodyText = document.body.innerText;
 
-    // ── 3. Patient name from rendered text ────────────────────────────────────
-    // PCC renders "Abramczyk, Patricia (7018)" visibly on the page.
-    // Pattern: one or more capitalised surname words, comma, given name(s), optional (ID)
-    const namePattern = /\b([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*\((\d{4,9})\)/;
-    const nameMatch = bodyText.match(namePattern);
-    if (nameMatch) {
-      info.lastName  = nameMatch[1].trim();
-      info.firstName = nameMatch[2].trim();
-      info.name      = `${info.firstName} ${info.lastName}`;
-      if (!info.pccId) {
-        info.pccId = nameMatch[3];
-        info.mrn   = "PCC-" + nameMatch[3];
-      }
-    } else {
-      // Fallback: "Last, First" without an ID number (e.g. from page title)
-      const titleMatch = document.title.match(/^([A-Z][A-Za-z'\-]+),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)/);
-      if (titleMatch) {
-        info.lastName  = titleMatch[1].trim();
-        info.firstName = titleMatch[2].trim();
+    // ── 4. Fallback name detection from rendered text ─────────────────────────
+    if (!info.name) {
+      const namePattern = /\b([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*\((\d{4,9})\)/;
+      const nameMatch = bodyText.match(namePattern);
+      if (nameMatch) {
+        info.lastName  = nameMatch[1].trim();
+        info.firstName = nameMatch[2].trim();
         info.name      = `${info.firstName} ${info.lastName}`;
+        if (!info.pccId) { info.pccId = nameMatch[3]; info.mrn = "PCC-" + nameMatch[3]; }
+      } else {
+        // Last fallback: page title "Last, First - PointClickCare"
+        const titleMatch = document.title.match(/^([A-Z][A-Za-z'\-]+),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)/);
+        if (titleMatch) {
+          info.lastName  = titleMatch[1].trim();
+          info.firstName = titleMatch[2].trim();
+          info.name      = `${info.firstName} ${info.lastName}`;
+        }
       }
+    }
+
+    // ── 5. Nickname / "commonly known as" ────────────────────────────────────
+    // PCC sometimes shows: Beavers, Valerie (9906) "Val"
+    // Look for a quoted word near the patient name area.
+    const nicknamePattern = /\b(?:[A-Z][A-Za-z'\-]+),\s+[A-Z][A-Za-z'\-]+[^""\n]*["""]([A-Za-z'\-]+)["""]/;
+    const nnMatch = bodyText.match(nicknamePattern);
+    if (nnMatch) info.nickname = nnMatch[1].trim();
+
+    // Also check onclick attribute directly for a nickname suffix
+    if (!info.nickname && careProfileBtn) {
+      const onclick = careProfileBtn.getAttribute("onclick") || "";
+      const nnOnclick = onclick.match(/\)\s*[""]([A-Za-z'\-]+)[""]/);
+      if (nnOnclick) info.nickname = nnOnclick[1].trim();
     }
 
     // ── 4. DOB, Age, Gender from rendered text ────────────────────────────────
@@ -262,6 +303,7 @@
           <div id="pccscribe-create-form" style="display:none; margin-top:10px;">
             <div class="pccscribe-form-title">New Patient Details</div>
             <input id="pccf-name" class="pccscribe-input" placeholder="Full name *" type="text" />
+            <input id="pccf-nickname" class="pccscribe-input" placeholder='Known as (e.g. "Val")' type="text" />
             <div class="pccscribe-row">
               <input id="pccf-age" class="pccscribe-input" placeholder="Age *" type="number" min="0" max="130" style="width:70px;flex-shrink:0;" />
               <input id="pccf-gender" class="pccscribe-input" placeholder="Gender" type="text" style="flex:1;" />
@@ -269,7 +311,8 @@
             <input id="pccf-dob" class="pccscribe-input" placeholder="Date of birth (YYYY-MM-DD)" type="text" />
             <input id="pccf-facility" class="pccscribe-input" placeholder="Facility name *" type="text" />
             <input id="pccf-unit" class="pccscribe-input" placeholder="Unit / Room *" type="text" />
-            <input id="pccf-mrn" class="pccscribe-input" placeholder="MRN / PCC ID" type="text" />
+            <input id="pccf-mrn" class="pccscribe-input" placeholder="MRN / PCC Chart ID" type="text" />
+            <input id="pccf-pccdbid" class="pccscribe-input" placeholder="PCC Internal ID (auto)" type="text" style="color:#9ca3af;" />
             <input id="pccf-physician" class="pccscribe-input" placeholder="Attending physician" type="text" />
             <div class="pccscribe-form-btns">
               <button id="pccscribe-create-submit" class="pccscribe-btn-primary" style="flex:1;">Create Patient</button>
@@ -360,12 +403,16 @@
     const physEl = document.getElementById("pccf-physician");
 
     if (nameEl && info.name) nameEl.value = info.name;
+    const nicknameEl = document.getElementById("pccf-nickname");
+    if (nicknameEl && info.nickname) nicknameEl.value = info.nickname;
     if (ageEl && info.age) ageEl.value = String(info.age);
     if (genderEl && info.gender) genderEl.value = info.gender;
     if (dobEl && info.dob) dobEl.value = info.dob;
     if (facilityEl && info.facility) facilityEl.value = info.facility;
     if (unitEl && info.unit) unitEl.value = info.unit;
     if (mrnEl && info.mrn) mrnEl.value = info.mrn;
+    const pccDbIdEl = document.getElementById("pccf-pccdbid");
+    if (pccDbIdEl && info.pccDbId) pccDbIdEl.value = info.pccDbId;
     if (physEl && info.physician) physEl.value = info.physician;
 
     form.style.display = "block";
@@ -464,12 +511,15 @@
     const patientEl = document.getElementById("pccscribe-detected-patient");
     if (patientEl) {
       if (cachedPatientInfo.name) {
+        const displayName = cachedPatientInfo.nickname
+          ? `${cachedPatientInfo.name} <span style="color:#6b7280;font-weight:400;font-size:12px;">"${cachedPatientInfo.nickname}"</span>`
+          : cachedPatientInfo.name;
         const sub = [
           cachedPatientInfo.age ? `Age ${cachedPatientInfo.age}` : null,
-          cachedPatientInfo.mrn || null,
+          cachedPatientInfo.pccId ? `#${cachedPatientInfo.pccId}` : null,
           cachedPatientInfo.facility || null,
         ].filter(Boolean).join(" · ");
-        patientEl.innerHTML = `<strong>${cachedPatientInfo.name}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}`;
+        patientEl.innerHTML = `<strong>${displayName}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}`;
         patientEl.classList.remove("pccscribe-undetected");
       } else {
         patientEl.textContent = "Patient not detected — open a patient chart";

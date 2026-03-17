@@ -120,47 +120,88 @@ async function handleFetchNoteContent(printUrl) {
         cleanup({ success: false, error: "Timed out loading print view" });
       }, TIMEOUT_MS);
 
+      let extracted = false; // guard against multiple complete events
+
       function onUpdated(updatedTabId, changeInfo) {
         if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-        chrome.scripting.executeScript(
-          {
-            target: { tabId },
-            func: () => {
-              // Remove script/style/nav/header elements then grab all visible text
-              try {
-                const clone = document.body.cloneNode(true);
-                clone.querySelectorAll(
-                  "script, style, noscript, nav, header, footer, .navbar, #navbar, .menu, [class*='nav']"
-                ).forEach((el) => el.remove());
+        if (extracted) return;
+        extracted = true;
+        // Remove listener immediately so duplicate complete events don't re-trigger
+        chrome.tabs.onUpdated.removeListener(onUpdated);
 
-                // Try to find a dedicated note content area first
-                const contentArea =
-                  clone.querySelector(".note-content") ||
-                  clone.querySelector(".noteContent") ||
-                  clone.querySelector(".print-content") ||
-                  clone.querySelector("form") ||
-                  clone.querySelector("table") ||
-                  clone;
+        // Small delay — some PCC print pages finish navigation then render via JS
+        setTimeout(() => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              func: () => {
+                try {
+                  // Detect if we've been redirected to a login/session page
+                  const url = window.location.href;
+                  const isLoginPage =
+                    url.includes("login") ||
+                    url.includes("logon") ||
+                    url.includes("signin") ||
+                    document.title.toLowerCase().includes("login") ||
+                    !!document.querySelector("input[type='password']");
+                  if (isLoginPage) return { text: "", url, redirectedToLogin: true };
 
-                const text = (contentArea.innerText || contentArea.textContent || "").trim();
-                return { text, url: window.location.href };
-              } catch (e) {
-                return { text: document.body.innerText.trim(), url: window.location.href };
-              }
+                  const clone = document.body.cloneNode(true);
+                  clone.querySelectorAll(
+                    "script, style, noscript, nav, header, footer, " +
+                    ".navbar, #navbar, .navBar, .menu, [class*='menuBar'], " +
+                    "[class*='topNav'], [id*='topNav'], [class*='breadcrumb']"
+                  ).forEach((el) => el.remove());
+
+                  // Prefer a focused note content container if one exists
+                  const contentArea =
+                    clone.querySelector(".note-content") ||
+                    clone.querySelector(".noteContent") ||
+                    clone.querySelector(".print-content") ||
+                    clone.querySelector(".printContent") ||
+                    clone.querySelector("[class*='noteBody']") ||
+                    clone.querySelector("[class*='noteText']") ||
+                    clone.querySelector(".documentContent") ||
+                    clone.querySelector("form") ||
+                    clone.querySelector("table") ||
+                    clone;
+
+                  const text = (contentArea.innerText || contentArea.textContent || "").trim();
+                  return { text, url };
+                } catch (e) {
+                  return { text: document.body.innerText.trim(), url: window.location.href };
+                }
+              },
             },
-          },
-          (results) => {
-            if (chrome.runtime.lastError || !results?.[0]?.result) {
-              cleanup({ success: false, error: chrome.runtime.lastError?.message || "Script execution failed" });
-            } else {
-              const { text, url } = results[0].result;
-              cleanup({ success: true, content: text, finalUrl: url });
+            (results) => {
+              if (chrome.runtime.lastError || !results?.[0]?.result) {
+                cleanup({
+                  success: false,
+                  error: chrome.runtime.lastError?.message || "Script execution failed",
+                });
+              } else {
+                const { text, url, redirectedToLogin } = results[0].result;
+                if (redirectedToLogin) {
+                  cleanup({ success: false, error: "PCC session expired — please log in again" });
+                } else if (!text || text.length < 20) {
+                  cleanup({ success: false, error: "Print page returned empty content" });
+                } else {
+                  cleanup({ success: true, content: text, finalUrl: url });
+                }
+              }
             }
-          }
-        );
+          );
+        }, 800); // 800ms let JS-rendered print pages settle
       }
 
       chrome.tabs.onUpdated.addListener(onUpdated);
+
+      // Race-condition fix: if tab is already complete before listener registered
+      chrome.tabs.get(tabId, (t) => {
+        if (!chrome.runtime.lastError && t && t.status === "complete") {
+          onUpdated(tabId, { status: "complete" });
+        }
+      });
     });
   });
 }

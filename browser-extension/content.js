@@ -406,27 +406,75 @@
   }
 
   // ── Extract the print URL from an anchor element ─────────────────────────────
+  // PCC uses many onclick patterns — try them all before giving up.
   function getPrintUrl(anchor) {
     if (!anchor) return null;
+
+    function toAbsolute(u) {
+      if (!u) return null;
+      u = u.trim();
+      if (u.startsWith("http")) return u;
+      if (u.startsWith("/")) return window.location.origin + u;
+      return null;
+    }
+
     const href = anchor.getAttribute("href") || "";
-    // Direct URL (not javascript: and not bare #)
+    // 1) Direct href (not javascript: and not a bare anchor)
     if (href && !href.startsWith("javascript") && href !== "#" &&
-        !href.endsWith("#") && href !== window.location.href) {
-      return href.startsWith("http") ? href : window.location.origin + href;
+        !href.endsWith("#") && href !== window.location.href && href.length > 1) {
+      return toAbsolute(href);
     }
-    // onclick: window.open('/path', ...) or openWindow('/path', ...)
-    const onclick = anchor.getAttribute("onclick") || anchor.getAttribute("href") || "";
+
+    const onclick = (anchor.getAttribute("onclick") || "") +
+                    (href.startsWith("javascript") ? " " + href : "");
+
+    if (!onclick.trim()) return null;
+
+    // 2) window.open('url', ...) or openWindow('url', ...)
     const winOpen = onclick.match(/(?:window\.open|openWindow)\s*\(\s*['"]([^'"]+)['"]/i);
-    if (winOpen) {
-      const u = winOpen[1];
-      return u.startsWith("http") ? u : window.location.origin + u;
+    if (winOpen) return toAbsolute(winOpen[1]);
+
+    // 3) Named print/view functions with a URL as first string arg:
+    //    printNote('/url'), printView(), viewPrint(), openNoteForPrint(), popNote(), etc.
+    const namedFn = onclick.match(
+      /(?:printNote|printView|viewPrint|openNote|openForPrint|popNote|popupNote|openNoteForPrint|printNoteView)\s*\(\s*['"]([^'"]+)['"]/i
+    );
+    if (namedFn) return toAbsolute(namedFn[1]);
+
+    // 4) Any quoted string in onclick that looks like a PCC URL path
+    //    e.g. PointClickCare.something.print(event, '/PointClickCare/Clinical/...')
+    const allQuoted = [...onclick.matchAll(/['"]([^'"]{8,})['"]/g)].map(m => m[1]);
+    for (const q of allQuoted) {
+      if ((q.includes("/PointClickCare/") || q.includes("/pcc/") ||
+           q.includes("print") || q.includes("Print") ||
+           q.includes("note") || q.includes("Note")) &&
+          !q.includes(" ") && (q.startsWith("/") || q.startsWith("http"))) {
+        const abs = toAbsolute(q);
+        if (abs) return abs;
+      }
     }
-    // onclick: printNote('/path')
-    const fn = onclick.match(/(?:printNote|printView|viewPrint)\s*\(\s*['"]([^'"]+)['"]/i);
-    if (fn) {
-      const u = fn[1];
-      return u.startsWith("http") ? u : window.location.origin + u;
+
+    // 5) __doPostBack(target, arg) — ASP.NET style; can't navigate directly, skip
+    // 6) Fallback: look for the "view" sibling link in the same <td> and swap
+    //    "viewNote" for "printNote" in the URL (common PCC pattern)
+    const td = anchor.closest("td");
+    if (td) {
+      const viewAnchor = Array.from(td.querySelectorAll("a")).find(
+        (a) => a !== anchor && a.textContent.trim().toLowerCase() === "view"
+      );
+      if (viewAnchor) {
+        const viewHref = viewAnchor.getAttribute("href") || "";
+        if (viewHref && !viewHref.startsWith("javascript") && viewHref.length > 4) {
+          const printHref = viewHref
+            .replace("viewNote", "printNote")
+            .replace("viewForm", "printForm")
+            .replace("/view/", "/print/")
+            .replace("action=view", "action=print");
+          if (printHref !== viewHref) return toAbsolute(printHref);
+        }
+      }
     }
+
     return null;
   }
 

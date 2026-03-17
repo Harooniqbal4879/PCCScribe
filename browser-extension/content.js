@@ -9,8 +9,7 @@
 
   function detectPatientInfo() {
     const info = {
-      name: null,       // "Patricia Abramczyk" (normalised First Last)
-      rawName: null,    // Raw: "Abramczyk, Patricia (7018)"
+      name: null,       // "Patricia Abramczyk" (First Last)
       firstName: null,
       lastName: null,
       mrn: null,
@@ -28,123 +27,104 @@
     info.pccId = urlParams.get("ESOLclientid") || urlParams.get("clientId") || urlParams.get("id") || null;
     if (info.pccId) info.mrn = "PCC-" + info.pccId;
 
-    // ── 2. Patient name ────────────────────────────────────────────────────────
-    // PCC profile page shows "Abramczyk, Patricia (7018)" in the first h4 in the
-    // main content area, or sometimes in an element with class containing "clientName".
-    const nameSelectors = [
-      "h4.clientName",
-      "[class*='clientName']",
-      "[class*='client-name']",
-      ".residentName",
-      "[class*='residentName']",
-      ".patient-name",
-      "[data-testid='patient-name']",
-      "h1.patient",
-      ".header-patient-name",
-      // PCC uses h4 as the resident name in profile pages
-      "table.profile h4",
-      "div.profile h4",
-      "#clientName",
-      "span#clientName",
-      // Generic: first h4 in main content that contains a comma (Last, First pattern)
-    ];
-
-    for (const sel of nameSelectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const txt = el.textContent.trim();
-        if (txt && txt.length > 2) {
-          info.rawName = txt;
-          parseNameIntoInfo(txt, info);
-          break;
-        }
-      }
-    }
-
-    // Fallback: scan ALL h4 elements for "LastName, FirstName (ID)" pattern
-    if (!info.name) {
-      const allH4 = document.querySelectorAll("h4");
-      for (const h4 of allH4) {
-        const txt = h4.textContent.trim();
-        if (/^[A-Za-z'\-]+,\s+[A-Za-z'\- ]+/.test(txt)) {
-          info.rawName = txt;
-          parseNameIntoInfo(txt, info);
-          break;
-        }
-      }
-    }
-
-    // Fallback: page title  (PCC sets title to "LastName, FirstName - PointClickCare")
-    if (!info.name && document.title) {
-      const titleMatch = document.title.match(/^([A-Za-z'\-]+,\s+[A-Za-z'\- ]+?)(?:\s*[-–|]|\s+\()/);
-      if (titleMatch) {
-        info.rawName = titleMatch[1].trim();
-        parseNameIntoInfo(titleMatch[1], info);
-      }
-    }
-
-    // ── 3. Extract DOB, Age, Gender from page text ─────────────────────────────
-    // PCC renders: "DOB: 11/15/1949  Age: 76" and "Gender: Female"
+    // ── 2. Rendered page text — avoids <script> tag content bleed-in ──────────
+    // innerText only includes visible rendered text, unlike textContent.
     const bodyText = document.body.innerText;
 
-    if (!info.dob) {
-      const dobMatch = bodyText.match(/DOB[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
-      if (dobMatch) info.dob = parseMDY(dobMatch[1]);
-    }
-
-    if (!info.age) {
-      const ageMatch = bodyText.match(/\bAge[:\s]+(\d{1,3})\b/i);
-      if (ageMatch) info.age = parseInt(ageMatch[1]);
-    }
-
-    if (!info.gender) {
-      const gMatch = bodyText.match(/Gender[:\s]+(Male|Female|Non-binary|Other)/i);
-      if (gMatch) info.gender = gMatch[1];
-    }
-
-    // ── 4. Physician / attending ───────────────────────────────────────────────
-    if (!info.physician) {
-      const physMatch = bodyText.match(/Physician[:\s]+([A-Za-z\s\.,']+?)(?:\n|DOB|Gender|Status|Location|$)/im);
-      if (physMatch) info.physician = physMatch[1].trim().replace(/\s+/g, " ");
-    }
-
-    // ── 5. Location / Unit ────────────────────────────────────────────────────
-    // PCC: "Location: 2 - Bristol 218-B"
-    if (!info.unit) {
-      const locMatch = bodyText.match(/Location[:\s]+([^\n]{3,60})/i);
-      if (locMatch) info.unit = locMatch[1].trim();
-    }
-
-    // ── 6. Facility from top header ──────────────────────────────────────────
-    // PCC shows facility name in a header banner / org header
-    const facilitySelectors = [
-      "#orgName",
-      ".orgName",
-      "[class*='orgName']",
-      "[class*='facilityName']",
-      ".facility-name",
-      "#facilityName",
-      "header .org",
-      ".pcc-org-name",
-      // The top bar in PCC often shows "Applewood Nursing Center"
-      "#headerOrgName",
-      ".header-org",
-    ];
-    for (const sel of facilitySelectors) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent.trim().length > 2) {
-        info.facility = el.textContent.trim();
-        break;
+    // ── 3. Patient name from rendered text ────────────────────────────────────
+    // PCC renders "Abramczyk, Patricia (7018)" visibly on the page.
+    // Pattern: one or more capitalised surname words, comma, given name(s), optional (ID)
+    const namePattern = /\b([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*\((\d{4,9})\)/;
+    const nameMatch = bodyText.match(namePattern);
+    if (nameMatch) {
+      info.lastName  = nameMatch[1].trim();
+      info.firstName = nameMatch[2].trim();
+      info.name      = `${info.firstName} ${info.lastName}`;
+      if (!info.pccId) {
+        info.pccId = nameMatch[3];
+        info.mrn   = "PCC-" + nameMatch[3];
+      }
+    } else {
+      // Fallback: "Last, First" without an ID number (e.g. from page title)
+      const titleMatch = document.title.match(/^([A-Z][A-Za-z'\-]+),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)/);
+      if (titleMatch) {
+        info.lastName  = titleMatch[1].trim();
+        info.firstName = titleMatch[2].trim();
+        info.name      = `${info.firstName} ${info.lastName}`;
       }
     }
 
-    // Fallback: grab facility from page header text
+    // ── 4. DOB, Age, Gender from rendered text ────────────────────────────────
+    const dobMatch = bodyText.match(/DOB[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+    if (dobMatch) info.dob = parseMDY(dobMatch[1]);
+
+    // "Age: 76" or "Age 76"
+    const ageMatch = bodyText.match(/\bAge[:\s]+(\d{1,3})\b/i);
+    if (ageMatch) info.age = parseInt(ageMatch[1]);
+
+    // "Gender: Female" — explicit label only (avoids false positives)
+    const gMatch = bodyText.match(/\bGender[:\s]+(Male|Female|Non-binary|Other)\b/i);
+    if (gMatch) info.gender = gMatch[1];
+
+    // ── 5. Physician ──────────────────────────────────────────────────────────
+    // PCC: "Physician: Salman Khan"  (label followed by name, terminated by newline)
+    const physMatch = bodyText.match(/\bPhysician[:\s]+([A-Z][A-Za-z\s\.\-']+?)(?:\r?\n|DOB|Gender|Status|Location|Edit)/m);
+    if (physMatch) info.physician = physMatch[1].trim().replace(/\s{2,}/g, " ");
+
+    // ── 6. Unit / Location ────────────────────────────────────────────────────
+    // PCC: "Location: 2 - Bristol 218-B"
+    const locMatch = bodyText.match(/\bLocation[:\s]+([^\r\n]{3,60})/i);
+    if (locMatch) {
+      const loc = locMatch[1].trim();
+      // Skip pure UI labels
+      if (!/(select|choose|facility)/i.test(loc)) info.unit = loc;
+    }
+
+    // ── 7. Facility name — prefer PCC footer ─────────────────────────────────
+    // PCC footer has "Applewood Nursing Center\n18500 Van Horn Road..." as its first line.
+    // The footer element is typically <div id="footer"> or <div class="footer">.
+    const footerCandidates = [
+      "#footer", ".footer", "[class*='footer']",
+      "footer", "#pageFooter", ".pageFooter",
+    ];
+    for (const sel of footerCandidates) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      // Get only the first meaningful line of footer innerText
+      const lines = el.innerText.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+      for (const line of lines) {
+        if (
+          /(nursing|center|care|health|manor|home|medical|rehab|residence)/i.test(line) &&
+          !/facility selection|select a facility/i.test(line) &&
+          line.length < 80
+        ) {
+          info.facility = line;
+          break;
+        }
+      }
+      if (info.facility) break;
+    }
+
+    // Fallback: scan body text for facility name near the PCC Facility ID label
+    // Footer format: "Applewood Nursing Center\n...\nPCC Facility ID: SN-AW"
     if (!info.facility) {
-      // Look for an element in the top 200px of the page that contains "Nursing" or "Care"
-      const headerEls = document.querySelectorAll("header *, #header *, .header *");
+      const facilityIdMatch = bodyText.match(/([\w][^\n]{5,60}(?:Nursing|Center|Care|Health|Manor|Home|Medical|Rehab)[^\n]{0,40})\s*\n/i);
+      if (facilityIdMatch) {
+        const candidate = facilityIdMatch[1].trim();
+        if (!/facility selection|select a facility/i.test(candidate)) {
+          info.facility = candidate;
+        }
+      }
+    }
+
+    // Fallback: PCC top-right header bar often shows the facility short name
+    if (!info.facility) {
+      const headerEls = document.querySelectorAll(
+        "#headerOrgName, .orgHeading, .orgName, [id*='orgName'], [class*='orgName'], [class*='orgHeading']"
+      );
       for (const el of headerEls) {
-        const txt = el.textContent.trim();
-        if (txt.length > 5 && txt.length < 80 && /(nursing|center|care|health|manor|home|facility)/i.test(txt)) {
+        const txt = el.innerText.trim();
+        if (txt.length > 3 && txt.length < 80 && !/facility selection/i.test(txt)) {
           info.facility = txt;
           break;
         }
@@ -155,19 +135,15 @@
   }
 
   function parseNameIntoInfo(raw, info) {
-    // Formats:  "Abramczyk, Patricia (7018)"  OR  "Abramczyk, Patricia"
-    const m = raw.match(/^([A-Za-z'\-]+(?:\s+[A-Za-z'\-]+)*),\s+([A-Za-z'\- ]+?)(?:\s*\((\d+)\))?$/);
+    // Non-anchored match: works even if raw contains extra text
+    const m = raw.match(/([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*(?:\((\d+)\))?/);
     if (m) {
-      info.lastName = m[1].trim();
+      info.lastName  = m[1].trim();
       info.firstName = m[2].trim();
-      info.name = `${info.firstName} ${info.lastName}`;
-      if (m[3] && !info.pccId) {
-        info.pccId = m[3];
-        info.mrn = "PCC-" + m[3];
-      }
+      info.name      = `${info.firstName} ${info.lastName}`;
+      if (m[3] && !info.pccId) { info.pccId = m[3]; info.mrn = "PCC-" + m[3]; }
     } else {
-      // Best effort: treat as full name
-      info.name = raw.replace(/\s*\(\d+\)$/, "").trim();
+      info.name = raw.replace(/\s*\(\d+\)/, "").split("\n")[0].trim();
     }
   }
 

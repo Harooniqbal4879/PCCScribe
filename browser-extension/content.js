@@ -80,54 +80,38 @@
       if (!/(select|choose|facility)/i.test(loc)) info.unit = loc;
     }
 
-    // ── 7. Facility name — prefer PCC footer ─────────────────────────────────
-    // PCC footer has "Applewood Nursing Center\n18500 Van Horn Road..." as its first line.
-    // The footer element is typically <div id="footer"> or <div class="footer">.
-    const footerCandidates = [
-      "#footer", ".footer", "[class*='footer']",
-      "footer", "#pageFooter", ".pageFooter",
-    ];
-    for (const sel of footerCandidates) {
-      const el = document.querySelector(sel);
-      if (!el) continue;
-      // Get only the first meaningful line of footer innerText
-      const lines = el.innerText.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
-      for (const line of lines) {
-        if (
-          /(nursing|center|care|health|manor|home|medical|rehab|residence)/i.test(line) &&
-          !/facility selection|select a facility/i.test(line) &&
-          line.length < 80
-        ) {
-          info.facility = line;
+    // ── 7. Facility name — read from PCC's facilityProperties script tag ────────
+    // PCC embeds: var facilityProperties = {"properties":{"facility_name":"Applewood Nursing Center",...},...}
+    // Content scripts can read <script> tag textContent from the DOM even though they
+    // cannot access the page's JS execution context (window.facilityProperties).
+    for (const script of document.querySelectorAll("script")) {
+      const src = script.textContent || "";
+      if (src.includes("facilityProperties") && src.includes("facility_name")) {
+        const m = src.match(/["']facility_name["']\s*:\s*["']([^"']+)["']/);
+        if (m && m[1].trim().length > 2) {
+          info.facility = m[1].trim();
           break;
-        }
-      }
-      if (info.facility) break;
-    }
-
-    // Fallback: scan body text for facility name near the PCC Facility ID label
-    // Footer format: "Applewood Nursing Center\n...\nPCC Facility ID: SN-AW"
-    if (!info.facility) {
-      const facilityIdMatch = bodyText.match(/([\w][^\n]{5,60}(?:Nursing|Center|Care|Health|Manor|Home|Medical|Rehab)[^\n]{0,40})\s*\n/i);
-      if (facilityIdMatch) {
-        const candidate = facilityIdMatch[1].trim();
-        if (!/facility selection|select a facility/i.test(candidate)) {
-          info.facility = candidate;
         }
       }
     }
 
-    // Fallback: PCC top-right header bar often shows the facility short name
+    // Fallback: PCC footer first meaningful line
     if (!info.facility) {
-      const headerEls = document.querySelectorAll(
-        "#headerOrgName, .orgHeading, .orgName, [id*='orgName'], [class*='orgName'], [class*='orgHeading']"
-      );
-      for (const el of headerEls) {
-        const txt = el.innerText.trim();
-        if (txt.length > 3 && txt.length < 80 && !/facility selection/i.test(txt)) {
-          info.facility = txt;
-          break;
+      for (const sel of ["#footer", ".footer", "[class*='footer']", "footer"]) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const lines = el.innerText.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+        for (const line of lines) {
+          if (
+            /(nursing|center|care|health|manor|home|medical|rehab|residence)/i.test(line) &&
+            !/facility selection|select a facility/i.test(line) &&
+            line.length < 80
+          ) {
+            info.facility = line;
+            break;
+          }
         }
+        if (info.facility) break;
       }
     }
 

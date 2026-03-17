@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "PCCScribe"
+version = "1.0.0"
+id = "artifacts/pccscribe"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 22621
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/pccscribe run dev"
+
+[services.env]
+PORT = "22621"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/pccscribe", "run", "build"]
+publicDir = "artifacts/pccscribe/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"

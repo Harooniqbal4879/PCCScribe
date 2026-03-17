@@ -7,6 +7,90 @@
   // ─── PCC Patient Detection ───────────────────────────────────────────────────
   // Targets the actual PCC DOM as seen on cp_careclientprofile.jsp and similar pages.
 
+  // ─── Helper: extract text of a residentDetailsSummary cell by its label ──────
+  function extractDetailByLabel(label) {
+    const cells = document.querySelectorAll("td.residentDetailsLabel");
+    for (const cell of cells) {
+      if (cell.innerText.includes(label)) {
+        const sibling = cell.nextElementSibling;
+        return sibling ? sibling.innerText.replace(/\s+/g, " ").trim() : null;
+      }
+    }
+    return null;
+  }
+
+  // ─── Helper: extract current vitals from td.vital cells ──────────────────────
+  function extractVitals() {
+    const vitals = {};
+    const vitalCells = document.querySelectorAll("td.vital");
+    for (const cell of vitalCells) {
+      const detailsDiv = cell.querySelector(".vitalDetails");
+      if (!detailsDiv) continue;
+      const boldEl = detailsDiv.querySelector("b");
+      if (!boldEl) continue;
+
+      // Label may be "BP:" (value outside) or "Temp:97.6" (value inside bold)
+      const boldText = boldEl.innerText.replace(/\s+/g, "").trim();
+      // Get all text from vitalDetails, strip out the date divs to get value+unit
+      const dateDivs = Array.from(detailsDiv.querySelectorAll("div div, div"));
+      // Find timestamp: a div whose text looks like a date
+      let timestamp = null;
+      for (const d of dateDivs) {
+        if (/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}/.test(d.innerText)) {
+          timestamp = d.innerText.trim();
+          break;
+        }
+      }
+
+      // Full text of the details div (minus timestamp)
+      const fullText = detailsDiv.innerText.replace(timestamp || "", "").replace(/\s+/g, " ").trim();
+
+      // Extract label and value
+      // Pattern A: "BP: 119/76 mmHg" — label ends with colon, value follows
+      // Pattern B: "Temp:97.6 °F"    — value embedded in label
+      let label, value;
+      const colonSplit = boldText.match(/^([A-Za-z]+):(.+)$/);
+      if (colonSplit && colonSplit[2].length > 0) {
+        // Pattern B: label and value are in the bold text
+        label = colonSplit[1];
+        value = colonSplit[2] + " " + fullText.replace(boldText, "").trim();
+      } else {
+        // Pattern A: label is bold text (ends with colon), value is outside
+        label = boldText.replace(":", "");
+        value = fullText.replace(boldText, "").trim();
+      }
+
+      const unit = value.match(/[a-zA-Z°%\/]+/)?.[0] || "";
+      const numStr = value.split(/[^0-9./]/)[0];
+      const keyMap = {
+        BP: "bp", Temp: "temp", Pulse: "pulse", Weight: "weight",
+        Resp: "resp", BS: "bs", O2: "o2", Pain: "pain",
+      };
+      const key = keyMap[label] || label.toLowerCase();
+      vitals[key] = { value: numStr, unit: unit.trim(), timestamp };
+    }
+    return Object.keys(vitals).length > 0 ? vitals : null;
+  }
+
+  // ─── Helper: extract first emergency contact ──────────────────────────────────
+  function extractEmergencyContact() {
+    const rows = document.querySelectorAll("tr");
+    for (const row of rows) {
+      const cells = row.querySelectorAll("td");
+      if (cells.length < 5) continue;
+      const contactTypeCell = cells[cells.length - 1];
+      if (!contactTypeCell.innerText.includes("Emergency Contact # 1")) continue;
+      const nameCell = cells[1];
+      const phoneCell = cells[2];
+      const relationCell = cells[cells.length - 2];
+      const name = nameCell.innerText.replace(/\(\d+\)/, "").trim();
+      const phone = phoneCell.innerText.replace(/\s+/g, " ").trim();
+      const relation = relationCell.innerText.trim();
+      return `${name} (${relation}): ${phone}`;
+    }
+    return null;
+  }
+
   function detectPatientInfo() {
     const info = {
       name: null,       // "Patricia Abramczyk" (First Last)
@@ -23,6 +107,15 @@
       facility: null,   // "Applewood Nursing Center"
       physician: null,  // "Salman Khan"
       status: null,     // "Current"
+      // Clinical summary fields
+      allergies: null,          // "Amoxicillin, levoFLOXacin, ..."
+      codeStatus: null,         // "FULL CODE"
+      specialInstructions: null,// alert notes text
+      diet: null,               // dietary notes
+      initialAdmissionDate: null,// MDS initial admission date
+      enterpriseId: null,       // PCC enterprise/org ID
+      currentVitals: null,      // { bp, temp, pulse, weight, resp, bs, o2, pain } with timestamps
+      emergencyContact: null,   // "Matt Beavers (Son): Mobile: (734) 621-2028"
     };
 
     // ── 1. PCC client ID from URL ─────────────────────────────────────────────
@@ -193,6 +286,63 @@
         if (info.facility) break;
       }
     }
+
+    // ── 8. Clinical summary fields ────────────────────────────────────────────
+    // Allergies — td.allergyRed / allergyYellow / allergyNone, or by label
+    const allergyEl = document.querySelector("td.allergyRed, td.allergyYellow, td.allergyNone, td.allergyGreen");
+    if (allergyEl) {
+      const t = allergyEl.innerText.replace(/\s+/g, " ").trim();
+      if (t && !/^no known/i.test(t)) info.allergies = t;
+    }
+    if (!info.allergies) {
+      const a = extractDetailByLabel("Allergies:");
+      if (a && !/^no known/i.test(a)) info.allergies = a;
+    }
+
+    // Code status — find residentDetailsSummary containing code status keywords
+    const summaryEls = document.querySelectorAll("td.residentDetailsSummary");
+    for (const el of summaryEls) {
+      const t = el.innerText.replace(/\s+/g, " ").trim();
+      if (/\b(FULL CODE|DNR|DNI|COMFORT|HOSPICE|DO NOT RESUSCITATE|Code Status)/i.test(t)) {
+        // Strip the "Advance Directives" link text and extra whitespace
+        info.codeStatus = t.replace(/\(Advance Directives\)/gi, "").replace(/\s{2,}/g, " ").trim();
+        break;
+      }
+    }
+
+    // Special instructions — residentDetailsSummary following the "Special Instructions:" label
+    // When it has content, the residentInfoEmpty class is NOT present on the sibling
+    const si = extractDetailByLabel("Special Instructions:");
+    if (si && si.length > 1) info.specialInstructions = si;
+
+    // Diet
+    const dietEl = document.querySelector("td.dietDescriptions");
+    if (dietEl) {
+      const t = dietEl.innerText.replace(/\s+/g, " ").trim();
+      if (t) info.diet = t;
+    }
+    if (!info.diet) {
+      const d = extractDetailByLabel("Diet:");
+      if (d) info.diet = d;
+    }
+
+    // Admission date (re-entry)
+    const admDate = extractDetailByLabel("Admission (Re-entry):");
+    if (admDate) info.admissionDate = admDate;
+
+    // Initial admission date (MDS)
+    const initDate = extractDetailByLabel("Initial Admission Date (MDS):");
+    if (initDate) info.initialAdmissionDate = initDate;
+
+    // Enterprise ID
+    const eid = extractDetailByLabel("Enterprise ID:");
+    if (eid) info.enterpriseId = eid.replace(/\s/g, "");
+
+    // Current vitals
+    info.currentVitals = extractVitals();
+
+    // Emergency contact (first Emergency Contact #1)
+    info.emergencyContact = extractEmergencyContact();
 
     return info;
   }
@@ -499,6 +649,15 @@
       ...(nickname ? { nickname } : {}),
       ...(pccInternalId ? { pccInternalId } : {}),
       ...(cachedPatientInfo.status ? { admissionStatus: cachedPatientInfo.status } : {}),
+      // Clinical summary fields — auto-collected, no form input needed
+      ...(cachedPatientInfo.allergies ? { allergies: cachedPatientInfo.allergies } : {}),
+      ...(cachedPatientInfo.codeStatus ? { codeStatus: cachedPatientInfo.codeStatus } : {}),
+      ...(cachedPatientInfo.specialInstructions ? { specialInstructions: cachedPatientInfo.specialInstructions } : {}),
+      ...(cachedPatientInfo.diet ? { diet: cachedPatientInfo.diet } : {}),
+      ...(cachedPatientInfo.initialAdmissionDate ? { initialAdmissionDate: cachedPatientInfo.initialAdmissionDate } : {}),
+      ...(cachedPatientInfo.enterpriseId ? { enterpriseId: cachedPatientInfo.enterpriseId } : {}),
+      ...(cachedPatientInfo.currentVitals ? { currentVitals: JSON.stringify(cachedPatientInfo.currentVitals) } : {}),
+      ...(cachedPatientInfo.emergencyContact ? { emergencyContact: cachedPatientInfo.emergencyContact } : {}),
     };
 
     const result = await chrome.runtime.sendMessage({ type: "CREATE_PATIENT", payload });

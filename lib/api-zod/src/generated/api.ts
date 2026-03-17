@@ -33,6 +33,17 @@ export const ListPatientsResponseItem = zod.object({
   pccInternalId: zod.string().nullish(),
   admissionStatus: zod.string().nullish(),
   physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -55,6 +66,17 @@ export const CreatePatientBody = zod.object({
   pccInternalId: zod.string().nullish(),
   admissionStatus: zod.string().nullish(),
   physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
 });
 
 /**
@@ -79,6 +101,17 @@ export const GetPatientResponse = zod.object({
   pccInternalId: zod.string().nullish(),
   admissionStatus: zod.string().nullish(),
   physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -104,6 +137,17 @@ export const UpdatePatientBody = zod.object({
   pccInternalId: zod.string().nullish(),
   admissionStatus: zod.string().nullish(),
   physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
 });
 
 export const UpdatePatientResponse = zod.object({
@@ -121,6 +165,17 @@ export const UpdatePatientResponse = zod.object({
   pccInternalId: zod.string().nullish(),
   admissionStatus: zod.string().nullish(),
   physician: zod.string().nullish(),
+  allergies: zod.string().nullish(),
+  codeStatus: zod.string().nullish(),
+  specialInstructions: zod.string().nullish(),
+  diet: zod.string().nullish(),
+  initialAdmissionDate: zod.string().nullish(),
+  enterpriseId: zod.string().nullish(),
+  currentVitals: zod
+    .string()
+    .nullish()
+    .describe("JSON string of current vitals object"),
+  emergencyContact: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });

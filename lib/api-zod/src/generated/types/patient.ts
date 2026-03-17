@@ -21,6 +21,15 @@ export interface Patient {
   pccInternalId?: string | null;
   admissionStatus?: string | null;
   physician?: string | null;
+  allergies?: string | null;
+  codeStatus?: string | null;
+  specialInstructions?: string | null;
+  diet?: string | null;
+  initialAdmissionDate?: string | null;
+  enterpriseId?: string | null;
+  /** JSON string of current vitals object */
+  currentVitals?: string | null;
+  emergencyContact?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -49,6 +49,14 @@ router.post("/", async (req, res) => {
         pccInternalId: body.pccInternalId ?? null,
         admissionStatus: body.admissionStatus ?? null,
         physician: body.physician ?? null,
+        allergies: body.allergies ?? null,
+        codeStatus: body.codeStatus ?? null,
+        specialInstructions: body.specialInstructions ?? null,
+        diet: body.diet ?? null,
+        initialAdmissionDate: body.initialAdmissionDate ?? null,
+        enterpriseId: body.enterpriseId ?? null,
+        currentVitals: body.currentVitals ?? null,
+        emergencyContact: body.emergencyContact ?? null,
       })
       .returning();
     res.status(201).json({
@@ -105,6 +113,14 @@ router.put("/:patientId", async (req, res) => {
         pccInternalId: body.pccInternalId ?? null,
         admissionStatus: body.admissionStatus ?? null,
         physician: body.physician ?? null,
+        allergies: body.allergies ?? null,
+        codeStatus: body.codeStatus ?? null,
+        specialInstructions: body.specialInstructions ?? null,
+        diet: body.diet ?? null,
+        initialAdmissionDate: body.initialAdmissionDate ?? null,
+        enterpriseId: body.enterpriseId ?? null,
+        currentVitals: body.currentVitals ?? null,
+        emergencyContact: body.emergencyContact ?? null,
         updatedAt: new Date(),
       })
       .where(eq(patientsTable.id, patientId))

@@ -358,6 +358,31 @@ components:
         physician:
           type: string
           nullable: true
+        allergies:
+          type: string
+          nullable: true
+        codeStatus:
+          type: string
+          nullable: true
+        specialInstructions:
+          type: string
+          nullable: true
+        diet:
+          type: string
+          nullable: true
+        initialAdmissionDate:
+          type: string
+          nullable: true
+        enterpriseId:
+          type: string
+          nullable: true
+        currentVitals:
+          type: string
+          nullable: true
+          description: JSON string of current vitals object
+        emergencyContact:
+          type: string
+          nullable: true
         createdAt:
           type: string
         updatedAt:
@@ -407,6 +432,31 @@ components:
           type: string
           nullable: true
         physician:
+          type: string
+          nullable: true
+        allergies:
+          type: string
+          nullable: true
+        codeStatus:
+          type: string
+          nullable: true
+        specialInstructions:
+          type: string
+          nullable: true
+        diet:
+          type: string
+          nullable: true
+        initialAdmissionDate:
+          type: string
+          nullable: true
+        enterpriseId:
+          type: string
+          nullable: true
+        currentVitals:
+          type: string
+          nullable: true
+          description: JSON string of current vitals object
+        emergencyContact:
           type: string
           nullable: true
       required:

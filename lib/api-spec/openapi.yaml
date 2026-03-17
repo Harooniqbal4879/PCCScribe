@@ -340,6 +340,24 @@ components:
         primaryDiagnosis:
           type: string
           nullable: true
+        nickname:
+          type: string
+          nullable: true
+        dateOfBirth:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          nullable: true
+        pccInternalId:
+          type: string
+          nullable: true
+        admissionStatus:
+          type: string
+          nullable: true
+        physician:
+          type: string
+          nullable: true
         createdAt:
           type: string
         updatedAt:
@@ -371,6 +389,24 @@ components:
           type: string
           nullable: true
         primaryDiagnosis:
+          type: string
+          nullable: true
+        nickname:
+          type: string
+          nullable: true
+        dateOfBirth:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          nullable: true
+        pccInternalId:
+          type: string
+          nullable: true
+        admissionStatus:
+          type: string
+          nullable: true
+        physician:
           type: string
           nullable: true
       required:

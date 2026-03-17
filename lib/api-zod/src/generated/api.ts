@@ -27,6 +27,12 @@ export const ListPatientsResponseItem = zod.object({
   mrn: zod.string().nullish(),
   admissionDate: zod.string().nullish(),
   primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -43,6 +49,12 @@ export const CreatePatientBody = zod.object({
   mrn: zod.string().nullish(),
   admissionDate: zod.string().nullish(),
   primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
 });
 
 /**
@@ -61,6 +73,12 @@ export const GetPatientResponse = zod.object({
   mrn: zod.string().nullish(),
   admissionDate: zod.string().nullish(),
   primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -80,6 +98,12 @@ export const UpdatePatientBody = zod.object({
   mrn: zod.string().nullish(),
   admissionDate: zod.string().nullish(),
   primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
 });
 
 export const UpdatePatientResponse = zod.object({
@@ -91,6 +115,12 @@ export const UpdatePatientResponse = zod.object({
   mrn: zod.string().nullish(),
   admissionDate: zod.string().nullish(),
   primaryDiagnosis: zod.string().nullish(),
+  nickname: zod.string().nullish(),
+  dateOfBirth: zod.string().nullish(),
+  gender: zod.string().nullish(),
+  pccInternalId: zod.string().nullish(),
+  admissionStatus: zod.string().nullish(),
+  physician: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });

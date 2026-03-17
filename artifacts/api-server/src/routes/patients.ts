@@ -43,6 +43,12 @@ router.post("/", async (req, res) => {
         mrn: body.mrn ?? null,
         admissionDate: body.admissionDate ?? null,
         primaryDiagnosis: body.primaryDiagnosis ?? null,
+        nickname: body.nickname ?? null,
+        dateOfBirth: body.dateOfBirth ?? null,
+        gender: body.gender ?? null,
+        pccInternalId: body.pccInternalId ?? null,
+        admissionStatus: body.admissionStatus ?? null,
+        physician: body.physician ?? null,
       })
       .returning();
     res.status(201).json({
@@ -93,6 +99,12 @@ router.put("/:patientId", async (req, res) => {
         mrn: body.mrn ?? null,
         admissionDate: body.admissionDate ?? null,
         primaryDiagnosis: body.primaryDiagnosis ?? null,
+        nickname: body.nickname ?? null,
+        dateOfBirth: body.dateOfBirth ?? null,
+        gender: body.gender ?? null,
+        pccInternalId: body.pccInternalId ?? null,
+        admissionStatus: body.admissionStatus ?? null,
+        physician: body.physician ?? null,
         updatedAt: new Date(),
       })
       .where(eq(patientsTable.id, patientId))

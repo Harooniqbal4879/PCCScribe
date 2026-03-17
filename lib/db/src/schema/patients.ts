@@ -11,6 +11,13 @@ export const patientsTable = pgTable("patients", {
   mrn: text("mrn"),
   admissionDate: text("admission_date"),
   primaryDiagnosis: text("primary_diagnosis"),
+  // PCC-sourced fields
+  nickname: text("nickname"),
+  dateOfBirth: text("date_of_birth"),
+  gender: text("gender"),
+  pccInternalId: text("pcc_internal_id"),
+  admissionStatus: text("admission_status"),
+  physician: text("physician"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

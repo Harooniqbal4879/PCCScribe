@@ -467,12 +467,14 @@
 
   async function submitCreatePatient() {
     const name = (document.getElementById("pccf-name")?.value || "").trim();
+    const nickname = (document.getElementById("pccf-nickname")?.value || "").trim();
     const ageStr = (document.getElementById("pccf-age")?.value || "").trim();
     const gender = (document.getElementById("pccf-gender")?.value || "").trim();
     const dob = (document.getElementById("pccf-dob")?.value || "").trim();
     const facility = (document.getElementById("pccf-facility")?.value || "").trim();
     const unit = (document.getElementById("pccf-unit")?.value || "").trim();
     const mrn = (document.getElementById("pccf-mrn")?.value || "").trim();
+    const pccInternalId = (document.getElementById("pccf-pccdbid")?.value || "").trim();
     const physician = (document.getElementById("pccf-physician")?.value || "").trim();
     const age = parseInt(ageStr);
 
@@ -494,6 +496,9 @@
       ...(dob ? { dateOfBirth: dob } : {}),
       ...(gender ? { gender } : {}),
       ...(physician ? { physician } : {}),
+      ...(nickname ? { nickname } : {}),
+      ...(pccInternalId ? { pccInternalId } : {}),
+      ...(cachedPatientInfo.status ? { admissionStatus: cachedPatientInfo.status } : {}),
     };
 
     const result = await chrome.runtime.sendMessage({ type: "CREATE_PATIENT", payload });

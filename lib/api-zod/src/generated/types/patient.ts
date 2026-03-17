@@ -15,6 +15,12 @@ export interface Patient {
   mrn?: string | null;
   admissionDate?: string | null;
   primaryDiagnosis?: string | null;
+  nickname?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  pccInternalId?: string | null;
+  admissionStatus?: string | null;
+  physician?: string | null;
   createdAt: string;
   updatedAt: string;
 }

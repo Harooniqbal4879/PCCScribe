@@ -80,9 +80,8 @@ router.post("/", async (req, res) => {
 
 // ── POST /patients/sync — upsert by pccInternalId ────────────────────────────
 // IMPORTANT: must be registered BEFORE /:patientId to avoid route collision.
-// Looks up an existing patient by pccInternalId. If found → updates all fields
-// and returns { patient, created: false }. If not found → creates and returns
-// { patient, created: true }.
+// Uses a single atomic INSERT … ON CONFLICT DO UPDATE so concurrent syncs
+// from multiple browser tabs can never produce duplicate rows.
 router.post("/sync", async (req, res) => {
   try {
     const body = CreatePatientBody.parse(req.body);
@@ -96,25 +95,26 @@ router.post("/sync", async (req, res) => {
 
     const fields = buildPatientFields(body);
 
+    // Determine whether this will be an insert or an update so we can return
+    // the correct HTTP status code (201 vs 200).
     const [existing] = await db
-      .select()
+      .select({ id: patientsTable.id })
       .from(patientsTable)
       .where(eq(patientsTable.pccInternalId, body.pccInternalId));
 
-    if (existing) {
-      const [patient] = await db
-        .update(patientsTable)
-        .set({ ...fields, updatedAt: new Date() })
-        .where(eq(patientsTable.id, existing.id))
-        .returning();
-      return res.json({ patient: serializePatient(patient), created: false });
-    } else {
-      const [patient] = await db
-        .insert(patientsTable)
-        .values(fields)
-        .returning();
-      return res.status(201).json({ patient: serializePatient(patient), created: true });
-    }
+    const [patient] = await db
+      .insert(patientsTable)
+      .values(fields)
+      .onConflictDoUpdate({
+        target: patientsTable.pccInternalId,
+        set: { ...fields, updatedAt: new Date() },
+      })
+      .returning();
+
+    const created = !existing;
+    return res
+      .status(created ? 201 : 200)
+      .json({ patient: serializePatient(patient), created });
   } catch (err) {
     return res.status(400).json({ error: "validation_error", message: String(err) });
   }

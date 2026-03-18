@@ -452,20 +452,26 @@ export default function PatientDetail() {
                                 {(note as any).noteTypePcc || formatNoteType(note.noteType)}
                               </Badge>
                               {note.sourceUrl && (
-                                <Badge
-                                  variant="secondary"
-                                  className="bg-indigo-50 text-indigo-700 border-indigo-200 flex items-center gap-1 px-1.5"
+                                <a
+                                  href={note.sourceUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Open source page in PCC"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800 transition-colors"
                                 >
-                                  <Puzzle className="w-3 h-3" /> Extension
-                                </Badge>
+                                  <Puzzle className="w-3 h-3" /> View in PCC
+                                </a>
                               )}
                               {(note as any).printUrl && (
-                                <Badge
-                                  variant="secondary"
-                                  className="bg-emerald-50 text-emerald-700 border-emerald-200 flex items-center gap-1 px-1.5"
+                                <a
+                                  href={(note as any).printUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Open full note document in PCC"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 transition-colors"
                                 >
-                                  <CheckCircle2 className="w-3 h-3" /> Full text
-                                </Badge>
+                                  <CheckCircle2 className="w-3 h-3" /> Full note
+                                </a>
                               )}
                             </div>
                             <div className="text-sm font-medium text-slate-500 flex items-center gap-1.5">

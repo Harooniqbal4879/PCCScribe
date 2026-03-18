@@ -1,0 +1,29 @@
+Build a Chrome browser extension called "PALScribe PDF Fetcher" with the following exact specifications:
+
+Project structure:
+/manifest.json
+/background.js
+/content.js
+/panel.html
+/panel.js
+/pdf.min.js  (PDF.js library - download from cdnjs)
+/icons/icon16.png, icon48.png, icon128.png (placeholder icons are fine)
+
+manifest.json — Manifest V3, host permission for https://*.pointclickcare.com/*, permissions: tabs, scripting, sidePanel, storage. Register background.js as service worker. Register content.js as content script matching https://*.pointclickcare.com/*. Register panel.html as the side panel.
+
+content.js — Intercept ALL click events on anchor tags inside the PCC DOM. If the href contains /note, /document, /report, or .pdf, prevent default navigation, extract the full absolute URL, and send a chrome runtime message { type: 'FETCH_PDF', url }. Also listen for incoming messages of type RENDER_PDF — when received, inject a floating close button and an iframe pinned to the right side of the screen (50% width, 100% height, z-index 9999) with the dataUri as src. The close button should remove the iframe. Also listen for message type PDF_TEXT_READY and store the extracted text in window.__palscribeLastNote for later access by the extension.
+
+background.js — Listen for FETCH_PDF messages. Use fetch(url, { credentials: 'include', headers: { Accept: 'application/pdf, */*' } }). Get the response as arrayBuffer(). Convert to base64 using Uint8Array and String.fromCharCode. Build a data:application/pdf;base64,... URI. Send message { type: 'RENDER_PDF', dataUri } back to the originating tab. Also extract text using PDF.js (importScripts the local pdf.min.js). Use pdfjsLib.getDocument({ data: arrayBuffer }) to load the doc, iterate all pages, call page.getTextContent(), join all strings, and send a second message { type: 'PDF_TEXT_READY', text: extractedText } back to the tab. Handle errors gracefully — if PDF.js fails, still send the dataUri for visual rendering.
+
+panel.html — A clean dark-themed side panel UI. Header with "PALScribe" title and a small subtitle "Note Intelligence". A scrollable textarea labeled "Extracted Note Text" that auto-populates when a PDF is processed. A button "Copy Text" that copies the textarea content to clipboard. A button "Send to AI Summary" that calls chrome.tabs.sendMessage with { type: 'SUMMARIZE_NOTE' }. A status bar at the bottom showing the last fetch status (success/error/loading).
+
+panel.js — Listen for PDF_TEXT_READY storage events and populate the textarea. Wire up the Copy and Send to AI Summary buttons. Use chrome.storage.session to pass text between background and panel.
+
+Error handling requirements:
+
+If fetch returns non-200, show a toast notification injected into the PCC page saying "Could not load note — session may have expired"
+If the URL redirects to a CDN (check if response.url differs from original url), follow the redirect transparently — the fetch already does this, just log the final URL
+If the PDF is actually an HTML page (check content-type header), fall back to capturing the raw HTML, wrap it in a blob URL, and still send it as the iframe src
+
+
+DO NOT use any external APIs, OAuth, or API keys. The entire solution runs locally inside the browser extension using the existing PCC authenticated session cookie. No backend server needed.

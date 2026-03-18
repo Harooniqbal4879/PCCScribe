@@ -351,3 +351,31 @@
   color: #1d4ed8;
   border: 1px solid #bfdbfe;
 }
+
+/* ── Settings section ─────────────────────────────────────────────────────── */
+.pccscribe-settings-section {
+  margin-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+
+.pccscribe-settings-toggle {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s;
+}
+
+.pccscribe-settings-toggle:hover {
+  color: #374151;
+}
+
+.pccscribe-settings-body {
+  margin-top: 8px;
+}

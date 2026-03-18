@@ -695,6 +695,29 @@
         </button>
 
         <div id="pccscribe-status" class="pccscribe-status"></div>
+
+        <!-- Settings -->
+        <div class="pccscribe-settings-section">
+          <button id="pccscribe-settings-toggle" class="pccscribe-settings-toggle" type="button">
+            ⚙ Settings
+          </button>
+          <div id="pccscribe-settings-body" class="pccscribe-settings-body" style="display:none;">
+            <label class="pccscribe-label" style="margin-bottom:4px;">API Server URL</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input
+                id="pccscribe-api-url-input"
+                class="pccscribe-input"
+                type="url"
+                placeholder="https://pcc.etherhealth.ai/api"
+                style="flex:1;font-size:11px;"
+              />
+              <button id="pccscribe-save-url-btn" class="pccscribe-btn-primary" style="padding:6px 10px;font-size:11px;white-space:nowrap;">
+                Save
+              </button>
+            </div>
+            <div id="pccscribe-settings-status" style="font-size:10px;margin-top:4px;color:#6b7280;"></div>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -720,6 +743,40 @@
       hideCreateForm();
     });
     document.getElementById("pccscribe-create-submit").addEventListener("click", submitCreatePatient);
+
+    // ── Settings: toggle open/close ───────────────────────────────────────────
+    document.getElementById("pccscribe-settings-toggle").addEventListener("click", () => {
+      const body = document.getElementById("pccscribe-settings-body");
+      const isOpen = body.style.display !== "none";
+      body.style.display = isOpen ? "none" : "block";
+      if (!isOpen) {
+        // Populate current URL when opening
+        chrome.storage.sync.get(["apiUrl"], (result) => {
+          const urlInput = document.getElementById("pccscribe-api-url-input");
+          if (urlInput) urlInput.value = result.apiUrl || "https://pcc.etherhealth.ai/api";
+        });
+      }
+    });
+
+    // ── Settings: save URL ────────────────────────────────────────────────────
+    document.getElementById("pccscribe-save-url-btn").addEventListener("click", () => {
+      const input = document.getElementById("pccscribe-api-url-input");
+      const statusEl = document.getElementById("pccscribe-settings-status");
+      const url = (input?.value || "").trim().replace(/\/+$/, ""); // strip trailing slashes
+
+      if (!url.startsWith("http")) {
+        if (statusEl) { statusEl.textContent = "⚠ Must start with http:// or https://"; statusEl.style.color = "#ef4444"; }
+        return;
+      }
+
+      chrome.storage.sync.set({ apiUrl: url }, () => {
+        if (statusEl) {
+          statusEl.textContent = "✓ Saved — takes effect on next sync";
+          statusEl.style.color = "#10b981";
+          setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        }
+      });
+    });
   }
 
   // ─── Create Form ─────────────────────────────────────────────────────────────

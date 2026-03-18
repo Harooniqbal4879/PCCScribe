@@ -1,6 +1,6 @@
 // PCCScribe Background Service Worker
 
-const DEFAULT_API_URL = "https://your-pccscribe-app.replit.app/api";
+const DEFAULT_API_URL = "https://pcc.etherhealth.ai/api";
 
 async function getConfig() {
   return new Promise((resolve) => {

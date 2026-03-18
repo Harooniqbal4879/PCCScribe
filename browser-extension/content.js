@@ -1046,7 +1046,8 @@
     const notesWithPrintUrls = notesToSend.filter(n => n.printUrl);
     const notesWithoutPrintUrls = notesToSend.filter(n => !n.printUrl);
 
-    const enrichedNotes = [...notesWithoutPrintUrls];
+    // Notes without print URLs stay truncated
+    const enrichedNotes = [...notesWithoutPrintUrls.map(n => ({ ...n, contentQuality: "truncated" }))];
 
     for (let i = 0; i < notesWithPrintUrls.length; i++) {
       const note = notesWithPrintUrls[i];
@@ -1059,10 +1060,10 @@
       });
 
       if (result.success && result.content && result.content.length > 20) {
-        enrichedNotes.push({ ...note, content: result.content });
+        enrichedNotes.push({ ...note, content: result.content, contentQuality: "full" });
       } else {
         // Fall back to truncated content if print fetch fails
-        enrichedNotes.push(note);
+        enrichedNotes.push({ ...note, contentQuality: "truncated" });
       }
     }
 

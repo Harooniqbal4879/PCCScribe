@@ -19,7 +19,9 @@ import {
   User, Building2, Puzzle, CheckCircle2, AlertCircle,
   Stethoscope, Heart, Phone, Utensils, ClipboardList,
   Activity, ShieldAlert, Info, UserRound, Hash, Loader2,
+  MessageSquare, Send, Bot, ExternalLink,
 } from "lucide-react";
+import { useRef, useEffect } from "react";
 import { formatNoteType } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -75,6 +77,106 @@ export default function PatientDetail() {
 
   const [activeTab, setActiveTab] = useState("profile");
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+
+  // ── Chat state ────────────────────────────────────────────────────────────
+  interface ChatSource {
+    id: number; date: string; type: string; author: string | null;
+    quality: string; printUrl: string | null;
+  }
+  interface ChatMsg {
+    role: "user" | "assistant";
+    content: string;
+    sources?: ChatSource[];
+    streaming?: boolean;
+  }
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  async function sendChatMessage(e?: React.FormEvent) {
+    e?.preventDefault();
+    const text = chatInput.trim();
+    if (!text || chatLoading) return;
+
+    const userMsg: ChatMsg = { role: "user", content: text };
+    setChatMessages((prev) => [...prev, userMsg]);
+    setChatInput("");
+    setChatLoading(true);
+
+    // Add a streaming placeholder for the assistant reply
+    setChatMessages((prev) => [...prev, { role: "assistant", content: "", streaming: true }]);
+
+    try {
+      const history = chatMessages
+        .filter((m) => !m.streaming)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const response = await fetch(`/api/patients/${patientId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history }),
+      });
+
+      if (!response.ok || !response.body) throw new Error("Network error");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sources: ChatSource[] = [];
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "sources") {
+              sources = event.sources;
+              setChatMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                if (last?.streaming) msgs[msgs.length - 1] = { ...last, sources };
+                return msgs;
+              });
+            } else if (event.type === "delta") {
+              fullContent += event.content;
+              setChatMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                if (last?.streaming) msgs[msgs.length - 1] = { ...last, content: fullContent };
+                return msgs;
+              });
+            } else if (event.type === "done") {
+              setChatMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                if (last?.streaming) msgs[msgs.length - 1] = { ...last, streaming: false };
+                return msgs;
+              });
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    } catch (err) {
+      setChatMessages((prev) => {
+        const msgs = [...prev];
+        const last = msgs[msgs.length - 1];
+        if (last?.streaming) {
+          msgs[msgs.length - 1] = { ...last, content: "Sorry, something went wrong. Please try again.", streaming: false };
+        }
+        return msgs;
+      });
+    } finally {
+      setChatLoading(false);
+    }
+  }
 
   const { data: patient, isLoading: patientLoading } = useGetPatient(patientId);
   const { data: notes, isLoading: notesLoading } = useListPatientNotes(patientId);
@@ -246,6 +348,12 @@ export default function PatientDetail() {
                 {summaries.length}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger
+            value="chat"
+            className="rounded-lg px-5 py-2.5 data-[state=active]:bg-slate-100 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all font-medium"
+          >
+            <MessageSquare className="w-4 h-4 mr-2" /> Ask AI
           </TabsTrigger>
         </TabsList>
 
@@ -592,6 +700,115 @@ export default function PatientDetail() {
                   ))}
                 </div>
               )}
+            </TabsContent>
+
+            {/* ── CHAT TAB ──────────────────────────────────────────────────── */}
+            <TabsContent value="chat" className="m-0 border-none outline-none">
+              <Card className="border-slate-200/60 shadow-sm overflow-hidden">
+                <CardHeader className="pb-3 border-b border-slate-100">
+                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-primary" />
+                    Ask about this patient
+                    <span className="text-xs font-normal text-slate-400 ml-auto">
+                      Answers are grounded in synced clinical notes
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+
+                {/* Message thread */}
+                <div className="h-[420px] overflow-y-auto p-4 space-y-4 bg-slate-50/40">
+                  {chatMessages.length === 0 && (
+                    <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 gap-3">
+                      <MessageSquare className="w-10 h-10 text-slate-200" />
+                      <div>
+                        <p className="font-medium text-slate-500">Ask anything about this patient</p>
+                        <p className="text-sm mt-1">e.g. "What were the vitals yesterday?" or "Any falls reported?"</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 justify-center mt-2">
+                        {["What are the current vitals?", "Any pain reported recently?", "Summarize today's nursing notes", "What medications are listed?"].map((q) => (
+                          <button
+                            key={q}
+                            onClick={() => { setChatInput(q); }}
+                            className="text-xs bg-white border border-slate-200 rounded-full px-3 py-1.5 hover:border-primary/40 hover:text-primary transition-colors"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      {msg.role === "assistant" && (
+                        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <Bot className="w-3.5 h-3.5 text-primary" />
+                        </div>
+                      )}
+                      <div className={`max-w-[78%] space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
+                        <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                          msg.role === "user"
+                            ? "bg-primary text-white rounded-br-sm"
+                            : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm"
+                        }`}>
+                          {msg.content || (msg.streaming ? (
+                            <span className="flex gap-1 items-center py-1">
+                              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                            </span>
+                          ) : "")}
+                          {msg.streaming && msg.content && (
+                            <span className="inline-block w-0.5 h-3.5 bg-slate-400 ml-0.5 animate-pulse align-middle" />
+                          )}
+                        </div>
+                        {/* Source citations */}
+                        {msg.sources && msg.sources.length > 0 && !msg.streaming && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.sources.map((s, si) => (
+                              <a
+                                key={si}
+                                href={s.printUrl || undefined}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`${s.type} — ${s.date}${s.author ? ` — ${s.author}` : ""}`}
+                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                                  s.printUrl
+                                    ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 cursor-pointer"
+                                    : "bg-slate-100 text-slate-500 border-slate-200 cursor-default"
+                                }`}
+                              >
+                                [{si + 1}] {s.date}
+                                {s.printUrl && <ExternalLink className="w-2.5 h-2.5" />}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Input bar */}
+                <form onSubmit={sendChatMessage} className="p-3 border-t border-slate-100 bg-white flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Ask about vitals, medications, recent notes…"
+                    disabled={chatLoading}
+                    className="flex-1 text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 disabled:opacity-50"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="bg-primary text-white hover:bg-primary/90 rounded-xl px-4"
+                  >
+                    {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </Button>
+                </form>
+              </Card>
             </TabsContent>
           </motion.div>
         </AnimatePresence>

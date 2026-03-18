@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PALScribe</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    .header {
+      flex-shrink: 0;
+      padding: 14px 16px 12px;
+      background: #1e293b;
+      border-bottom: 1px solid #2d3f55;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-icon {
+      width: 28px;
+      height: 28px;
+      background: #2563eb;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .header-text h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #f1f5f9;
+      letter-spacing: -0.01em;
+    }
+
+    .header-text p {
+      font-size: 10px;
+      color: #64748b;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+
+    /* ── Status bar ──────────────────────────────────────────────────── */
+    .status-bar {
+      flex-shrink: 0;
+      padding: 7px 14px;
+      background: #162032;
+      border-bottom: 1px solid #1e3048;
+      font-size: 11px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 30px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #475569;
+      flex-shrink: 0;
+    }
+
+    .status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
+    .status-dot.ready   { background: #10b981; }
+    .status-dot.error   { background: #ef4444; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Main content ────────────────────────────────────────────────── */
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 12px;
+      gap: 10px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+    }
+
+    /* ── Note text area ──────────────────────────────────────────────── */
+    .note-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #note-text {
+      flex: 1;
+      width: 100%;
+      background: #1e293b;
+      border: 1px solid #2d3f55;
+      border-radius: 8px;
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.6;
+      padding: 10px 12px;
+      resize: none;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      placeholder-color: #475569;
+    }
+
+    #note-text:focus { border-color: #3b82f6; }
+    #note-text::placeholder { color: #475569; }
+
+    /* ── Action buttons ──────────────────────────────────────────────── */
+    .actions {
+      flex-shrink: 0;
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      border: none;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 8px 14px;
+      transition: background 0.15s, opacity 0.15s;
+      font-family: inherit;
+    }
+
+    #copy-btn {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #2d3f55;
+      flex-shrink: 0;
+    }
+
+    #copy-btn:hover { background: #273549; color: #e2e8f0; }
+
+    #ai-btn {
+      flex: 1;
+      background: #2563eb;
+      color: #fff;
+    }
+
+    #ai-btn:hover:not(:disabled) { background: #1d4ed8; }
+    #ai-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* ── AI response area ────────────────────────────────────────────── */
+    .ai-section {
+      flex-shrink: 0;
+      max-height: 45%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .ai-section.hidden { display: none; }
+
+    #ai-response {
+      flex: 1;
+      overflow-y: auto;
+      background: #0f2340;
+      border: 1px solid #1e3a5f;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.65;
+      color: #bfdbfe;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 80px;
+      max-height: 280px;
+    }
+
+    #ai-response.thinking::after {
+      content: "▋";
+      animation: blink 0.8s step-end infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .ai-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #clear-ai-btn {
+      background: none;
+      color: #475569;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    #clear-ai-btn:hover { background: #1e293b; color: #94a3b8; }
+
+    /* ── Idle state ──────────────────────────────────────────────────── */
+    .idle-msg {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: #334155;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .idle-msg .idle-icon {
+      font-size: 32px;
+      opacity: 0.4;
+    }
+
+    .idle-msg p {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-icon">📋</div>
+    <div class="header-text">
+      <h1>PALScribe</h1>
+      <p>Note Intelligence</p>
+    </div>
+  </div>
+
+  <div class="status-bar" id="status-bar">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">Waiting for a note click…</span>
+  </div>
+
+  <div class="content" id="main-content">
+
+    <!-- Idle state shown before any PDF is loaded -->
+    <div class="idle-msg" id="idle-msg">
+      <div class="idle-icon">🗒️</div>
+      <p>Click any note, document, or PDF link in PointClickCare to extract and summarize it here.</p>
+    </div>
+
+    <!-- Note text section (hidden until PDF loaded) -->
+    <div class="note-section hidden" id="note-section">
+      <div class="section-label">Extracted Note Text</div>
+      <textarea id="note-text" placeholder="Extracting text from note…" readonly></textarea>
+    </div>
+
+    <!-- Action buttons (hidden until PDF loaded) -->
+    <div class="actions hidden" id="actions">
+      <button id="copy-btn" title="Copy text to clipboard">Copy Text</button>
+      <button id="ai-btn" disabled>✦ Send to AI</button>
+    </div>
+
+    <!-- AI response section (hidden until summary requested) -->
+    <div class="ai-section hidden" id="ai-section">
+      <div class="ai-header">
+        <div class="section-label">AI Summary</div>
+        <button id="clear-ai-btn">✕ Clear</button>
+      </div>
+      <div id="ai-response"></div>
+    </div>
+
+  </div>
+
+  <script src="pdf.min.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

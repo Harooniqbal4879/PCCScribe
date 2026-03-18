@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "PCCScribe",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fetch clinical notes from PointClickCare and sync to PCCScribe for AI summarization.",
-  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "sidePanel"],
   "host_permissions": [
     "*://*.pointclickcare.com/*",
     "*://*.pointclickcare.ca/*"
@@ -15,6 +15,9 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
   },
   "background": {
     "service_worker": "background.js",

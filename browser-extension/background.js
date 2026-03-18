@@ -55,6 +55,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === "FETCH_PDF") {
+    handleFetchPdf(message, sender);
+    return false; // fire-and-forget; replies come as separate messages
+  }
+
+  if (message.type === "OPEN_SIDE_PANEL") {
+    if (sender.tab?.windowId) {
+      chrome.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
+    }
+    return false;
+  }
 });
 
 async function handleCheckConnection() {
@@ -222,6 +234,78 @@ async function handleSyncPatient(patientData) {
     return { success: true, patient: result.patient, created: result.created };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+// ─── PDF Fetcher ──────────────────────────────────────────────────────────────
+
+function arrayBufferToBase64(buffer) {
+  const uint8 = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    binary += String.fromCharCode(...uint8.slice(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function handleFetchPdf(message, sender) {
+  const tabId = sender.tab?.id;
+  const { url, patientId } = message;
+
+  await chrome.storage.session.set({ pdfStatus: "loading", pdfTimestamp: Date.now() });
+
+  function sendToast(msg) {
+    if (tabId) chrome.tabs.sendMessage(tabId, { type: "SHOW_TOAST", message: msg }).catch(() => {});
+  }
+
+  try {
+    const response = await fetch(url, {
+      credentials: "include",
+      headers: { Accept: "application/pdf, */*" },
+    });
+
+    if (response.url !== url) {
+      console.log("[PCCScribe] PDF redirected:", url, "→", response.url);
+    }
+
+    if (!response.ok) {
+      sendToast("Could not load note — session may have expired");
+      await chrome.storage.session.set({ pdfStatus: "error", pdfError: `HTTP ${response.status}` });
+      return;
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const isPdf = contentType.includes("pdf");
+    const arrayBuffer = await response.arrayBuffer();
+
+    let dataUri;
+    if (isPdf) {
+      const base64 = arrayBufferToBase64(arrayBuffer);
+      dataUri = `data:application/pdf;base64,${base64}`;
+    } else {
+      // HTML or other content — wrap in data URI for iframe display
+      const text = new TextDecoder().decode(arrayBuffer);
+      dataUri = `data:text/html;charset=utf-8,${encodeURIComponent(text)}`;
+    }
+
+    // Store so the side panel can pick it up and run PDF.js extraction
+    await chrome.storage.session.set({
+      pdfDataUri: dataUri,
+      pdfIsPdf: isPdf,
+      pdfPatientId: patientId || null,
+      pdfStatus: "ready",
+      pdfTimestamp: Date.now(),
+    });
+
+    // Tell the content script to show the inline PDF viewer
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { type: "RENDER_PDF", dataUri }).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[PCCScribe] PDF fetch error:", err);
+    sendToast("Could not load note — session may have expired");
+    await chrome.storage.session.set({ pdfStatus: "error", pdfError: err.message });
   }
 }
 

@@ -1150,8 +1150,70 @@
     el.className = `pccscribe-status pccscribe-status-${type}`;
   }
 
+  // ─── PDF Link Interceptor ─────────────────────────────────────────────────────
+
+  function initPdfInterceptor() {
+    document.addEventListener("click", (e) => {
+      const link = e.target.closest("a[href]");
+      if (!link) return;
+      const href = link.href || "";
+      if (!/\/(note|document|report)\b|\.pdf(\?|#|$)/i.test(href)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const select = document.getElementById("pccscribe-patient-select");
+      const patientId = select?.value ? parseInt(select.value) : null;
+
+      chrome.runtime.sendMessage({ type: "FETCH_PDF", url: href, patientId });
+      chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+      showPccToast("⏳ Fetching note...", "info");
+    }, true); // capture phase so we intercept before PCC handlers
+  }
+
+  // ─── Incoming message handler ─────────────────────────────────────────────────
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === "RENDER_PDF") renderPdfViewer(message.dataUri);
+    if (message.type === "SHOW_TOAST") showPccToast(message.message, "error");
+  });
+
+  // ─── PDF viewer (inline iframe pinned to right side of page) ─────────────────
+
+  function renderPdfViewer(dataUri) {
+    const existing = document.getElementById("pccscribe-pdf-viewer");
+    if (existing) existing.remove();
+
+    const container = document.createElement("div");
+    container.id = "pccscribe-pdf-viewer";
+    container.className = "pccscribe-pdf-container";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "pccscribe-pdf-close";
+    closeBtn.textContent = "✕ Close Note";
+    closeBtn.addEventListener("click", () => container.remove());
+
+    const iframe = document.createElement("iframe");
+    iframe.className = "pccscribe-pdf-iframe";
+    iframe.src = dataUri;
+
+    container.appendChild(closeBtn);
+    container.appendChild(iframe);
+    document.body.appendChild(container);
+  }
+
+  // ─── Toast notification injected into PCC page ────────────────────────────────
+
+  function showPccToast(msg, type = "error") {
+    const toast = document.createElement("div");
+    toast.className = `pccscribe-toast pccscribe-toast-${type}`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+
   // ─── Init ────────────────────────────────────────────────────────────────────
-  function init() { createFAB(); createPanel(); }
+  function init() { createFAB(); createPanel(); initPdfInterceptor(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

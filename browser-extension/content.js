@@ -865,26 +865,24 @@
 
     document.getElementById("pccscribe-files-refresh").addEventListener("click", () => {
       const statusEl = document.getElementById("pccscribe-files-scan-status");
-      if (statusEl) { statusEl.textContent = "Scanning page for documents…"; }
-      scanUploadedFiles();
-      chrome.storage.session.set({ triggerFileScan: Date.now() });
-      setTimeout(() => {
-        chrome.storage.session.get(["pdfScanDiag", "pdfFileList"], (r) => {
-          const diag  = r.pdfScanDiag  || "";
-          const count = (r.pdfFileList || []).length;
-          if (statusEl) {
-            if (count > 0) {
-              statusEl.style.color = "#10b981";
-              statusEl.textContent = `✓ Found ${count} document${count !== 1 ? "s" : ""}`;
-            } else {
-              statusEl.style.color = "#ef4444";
-              statusEl.textContent = `Nothing found (${diag}) — try opening the Misc tab first`;
-            }
-            setTimeout(() => { if (statusEl) { statusEl.textContent = ""; statusEl.style.color = ""; } }, 6000);
+      if (statusEl) { statusEl.style.color = ""; statusEl.textContent = "Scanning all page frames…"; }
+      // Ask background to scan every frame using executeScript — more reliable than
+      // cross-frame storage events, works even without sub-frame content script injection.
+      chrome.runtime.sendMessage({ type: "SCAN_FOR_FILES" }, (resp) => {
+        const files = resp?.files || [];
+        const diag  = resp?.diag  || "";
+        if (statusEl) {
+          if (files.length > 0) {
+            statusEl.style.color = "#10b981";
+            statusEl.textContent = `✓ Found ${files.length} document${files.length !== 1 ? "s" : ""}`;
+          } else {
+            statusEl.style.color = "#ef4444";
+            statusEl.textContent = `Nothing found (${diag})`;
           }
-          loadFilesPane();
-        });
-      }, 700);
+          setTimeout(() => { if (statusEl) { statusEl.textContent = ""; statusEl.style.color = ""; } }, 6000);
+        }
+        loadFilesPane();
+      });
     });
 
     updateFilesBadge();

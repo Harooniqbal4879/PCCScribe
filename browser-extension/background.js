@@ -74,6 +74,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     );
     return false;
   }
+
+  if (message.type === "SCAN_FOR_FILES") {
+    handleScanForFiles(sender).then(sendResponse);
+    return true; // keep channel open for async response
+  }
 });
 
 async function handleCheckConnection() {
@@ -338,6 +343,144 @@ async function handleSaveFiles({ files, pccClientId }) {
     console.log(`[PALScribe] SAVE_FILES: saved ${result.saved} files for patient ${patient.id}`);
   } catch (err) {
     console.error("[PALScribe] SAVE_FILES error:", err);
+  }
+}
+
+// ── Injected into every frame by handleScanForFiles ─────────────────────────
+// MUST be self-contained: no references to outer scope variables/functions.
+function scanFrameForFiles() {
+  const s1 = Array.from(document.querySelectorAll('a[href*="openFile"], a[onclick*="openFile"]'));
+  const s2 = Array.from(document.querySelectorAll('a[href*="viewfile"]'));
+  const s3 = Array.from(document.querySelectorAll("tr a")).filter(
+    (a) => /\.pdf\b/i.test((a.textContent || "").trim())
+  );
+
+  const seen = new Set();
+  const allAnchors = [];
+  for (const a of [...s1, ...s2, ...s3]) {
+    if (!seen.has(a)) { seen.add(a); allAnchors.push(a); }
+  }
+
+  const files = [];
+  const seenIds = new Set();
+
+  for (const a of allAnchors) {
+    const hrefRaw    = a.getAttribute("href")   || "";
+    const onclickRaw = a.getAttribute("onclick") || "";
+    const raw        = hrefRaw + " " + onclickRaw;
+
+    let fileId = "", clientId = "", storedName = "", fileUrl = "";
+
+    // Pattern A: openFile('id','clientId','name.pdf')
+    const mA = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/i);
+    if (mA) { [, fileId, clientId, storedName] = mA; }
+
+    // Pattern B: viewfile.xhtml URL
+    if (!fileId && hrefRaw.includes("viewfile")) {
+      try {
+        const pu = new URL(hrefRaw.startsWith("http") ? hrefRaw : location.origin + hrefRaw);
+        fileId     = pu.searchParams.get("fileId")           || "";
+        clientId   = pu.searchParams.get("clientId")         || "";
+        storedName = pu.searchParams.get("fileMetadataName") || "";
+        fileUrl    = pu.href;
+      } catch (_) {}
+    }
+
+    // Pattern C: PDF text link → look for fileId in edit/del sibling link in the same row
+    if (!fileId && /\.pdf\b/i.test((a.textContent || "").trim())) {
+      const row = a.closest("tr");
+      if (row) {
+        const sibling = Array.from(row.querySelectorAll("a[href]")).find(
+          (sl) =>
+            /[?&]fileId=/i.test(sl.getAttribute("href") || "") ||
+            /[?&]documentId=/i.test(sl.getAttribute("href") || "")
+        );
+        if (sibling) {
+          try {
+            const sh = sibling.getAttribute("href") || "";
+            const su = new URL(sh.startsWith("http") ? sh : location.origin + sh);
+            fileId   = su.searchParams.get("fileId") || su.searchParams.get("documentId") || "";
+            clientId = su.searchParams.get("clientId") || su.searchParams.get("ESOLclientid") || "";
+          } catch (_) {}
+        }
+        // Also check data attributes on row cells
+        if (!fileId) {
+          const el = row.querySelector("[data-file-id],[data-fileid],[data-documentid]");
+          if (el) fileId = el.dataset.fileId || el.dataset.fileid || el.dataset.documentid || "";
+        }
+        storedName = storedName || (a.textContent || "").trim();
+      }
+    }
+
+    if (!fileId || seenIds.has(fileId)) continue;
+    seenIds.add(fileId);
+
+    const displayName = (a.textContent || "").trim() || storedName;
+    if (!/\.pdf\b/i.test(displayName) && !/\.pdf\b/i.test(storedName)) continue;
+
+    const row = a.closest("tr");
+    const cells      = row ? Array.from(row.querySelectorAll("td")) : [];
+    const cellTexts  = cells.map((td) => td.textContent.trim());
+    const dateMatch  = cellTexts.find((t) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) || "";
+
+    const linkTdIdx = cells.findIndex((td) => td.contains(a));
+    let category = "";
+    for (let ci = linkTdIdx + 1; ci < cells.length; ci++) {
+      const text = cells[ci].textContent.trim();
+      if (text.length < 2) continue;
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) continue;
+      if (cells[ci].querySelector("a")) continue;
+      category = text;
+      break;
+    }
+
+    const urlClientId = clientId || new URLSearchParams(location.search).get("ESOLclientid") || "";
+    if (!fileUrl) {
+      fileUrl = `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName || displayName)}`;
+    }
+
+    files.push({ fileId, clientId: urlClientId, storedName: storedName || displayName, displayName, effectiveDate: dateMatch, category, url: fileUrl });
+    if (files.length >= 20) break;
+  }
+
+  // Also return diagnostic info so the caller knows what was tried
+  return { files, diag: `S1:${s1.length} S2:${s2.length} S3:${s3.length}` };
+}
+
+async function handleScanForFiles(sender) {
+  const tabId = sender.tab?.id;
+  if (!tabId) return { files: [], error: "no tabId" };
+
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const allFiles = [];
+    const seenIds  = new Set();
+    const diagParts = [];
+
+    for (const frame of frames || []) {
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [frame.frameId] },
+          func: scanFrameForFiles,
+          world: "ISOLATED",
+        });
+        const { files: frameFiles = [], diag = "" } = results?.[0]?.result || {};
+        if (diag) diagParts.push(`frame${frame.frameId}[${diag}]`);
+        for (const f of frameFiles) {
+          if (!seenIds.has(f.fileId)) { seenIds.add(f.fileId); allFiles.push(f); }
+        }
+      } catch (_) {}
+    }
+
+    const diagString = diagParts.join(" ") || "no frames";
+    await chrome.storage.session.set({
+      pdfScanDiag: `${diagString} → found:${allFiles.length}`,
+      ...(allFiles.length > 0 ? { pdfFileList: allFiles } : {}),
+    });
+
+    return { files: allFiles, diag: diagString };
+  } catch (err) {
+    return { files: [], error: err.message };
   }
 }
 

@@ -763,6 +763,7 @@
       filesBtn.classList.add("active");
       notesPane.classList.add("pccscribe-pane-hidden");
       filesPane.classList.remove("pccscribe-pane-hidden");
+      scanUploadedFiles();
       loadFilesPane();
     } else {
       filesBtn.classList.remove("active");
@@ -1336,15 +1337,16 @@
     setTimeout(() => toast.remove(), 4000);
   }
 
-  // ─── Uploaded Files scanner (filesdisplay.xhtml) ─────────────────────────────
-  // Detects the PCC "Client Uploaded Files" page, extracts the latest 5 PDFs,
-  // stores them in session storage, and opens the PALScribe side panel.
+  // ─── Uploaded Files scanner ───────────────────────────────────────────────────
+  // Scans any PCC page with openFile() anchors or viewfile.xhtml links (filesdisplay,
+  // Misc tab, etc.), extracts up to 15 PDFs, and stores them in session storage.
 
   function scanUploadedFiles() {
-    if (!location.pathname.includes("filesdisplay")) return;
-
-    // All file anchors use href="javascript:openFile('fileId','clientId','stored.pdf')"
-    const anchors = Array.from(document.querySelectorAll('a[href*="openFile"]'));
+    // Scan any PCC page that has openFile() anchors (filesdisplay, Misc tab, etc.)
+    // Also look for direct viewfile.xhtml links as a fallback
+    const openFileAnchors = Array.from(document.querySelectorAll('a[href*="openFile"]'));
+    const viewfileAnchors = Array.from(document.querySelectorAll('a[href*="viewfile.xhtml?fileId"]'));
+    const anchors = openFileAnchors.length > 0 ? openFileAnchors : viewfileAnchors;
     if (anchors.length === 0) return;
 
     const files = [];
@@ -1352,24 +1354,49 @@
 
     for (const a of anchors) {
       const raw = a.getAttribute("href") || "";
-      const m = raw.match(/openFile\('(\d+)',\s*'(\d+)',\s*'([^']+)'\)/);
-      if (!m) continue;
-      const [, fileId, clientId, storedName] = m;
-      if (seen.has(fileId)) continue;
+      let fileId, clientId, storedName;
+
+      // Pattern 1: javascript:openFile('fileId','clientId','stored.pdf')
+      const m1 = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/);
+      if (m1) {
+        [, fileId, clientId, storedName] = m1;
+      } else {
+        // Pattern 2: viewfile.xhtml?fileId=X&clientId=Y&fileMetadataName=Z
+        const p = new URL(raw.startsWith("http") ? raw : location.origin + raw);
+        fileId    = p.searchParams.get("fileId")           || "";
+        clientId  = p.searchParams.get("clientId")         || "";
+        storedName = p.searchParams.get("fileMetadataName") || "";
+      }
+
+      if (!fileId || seen.has(fileId)) continue;
       seen.add(fileId);
 
-      // Filter to only PDFs (skip XML, etc.)
+      // PDFs only
       if (!/\.pdf$/i.test(storedName)) continue;
 
       const displayName = a.textContent.trim() || storedName;
 
-      // Get effective date from closest table row
+      // Parse table row for effective date and category
       const row = a.closest("tr");
-      const cellTexts = row ? Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim()) : [];
-      const dateMatch = cellTexts.find(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t));
-      const categoryCell = cellTexts.find(t => t.length > 3 && !/^\d/.test(t) && t !== displayName && t !== "edit" && t !== "del");
+      const cells = row ? Array.from(row.querySelectorAll("td")) : [];
+      const cellTexts = cells.map(td => td.textContent.trim());
 
-      // Determine client ID from URL if not in anchor
+      // Effective date: first cell matching mm/dd/yyyy (no time)
+      const dateMatch = cellTexts.find(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) || "";
+
+      // Category: first cell AFTER the anchor's cell that has no links, no dates, and is
+      // meaningful text (handles Misc tab order: edit | del | eff_date | doc | category | upload_date | uploader)
+      const linkTdIdx = cells.findIndex(td => td.contains(a));
+      let category = "";
+      for (let ci = linkTdIdx + 1; ci < cells.length; ci++) {
+        const text = cells[ci].textContent.trim();
+        if (text.length < 2) continue;
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) continue; // skip date cells
+        if (cells[ci].querySelector("a")) continue;            // skip cells with links
+        category = text;
+        break;
+      }
+
       const urlClientId = clientId || new URLSearchParams(location.search).get("ESOLclientid") || "";
 
       files.push({
@@ -1377,18 +1404,22 @@
         clientId: urlClientId,
         storedName,
         displayName,
-        effectiveDate: dateMatch || "",
-        category: categoryCell || "",
+        effectiveDate: dateMatch,
+        category,
         url: `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName)}`,
       });
 
-      if (files.length >= 5) break;
+      if (files.length >= 15) break;
     }
 
     if (files.length === 0) return;
 
     chrome.storage.session.set({ pdfFileList: files });
-    chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+
+    // Auto-open side panel only on the dedicated filesdisplay page
+    if (location.pathname.includes("filesdisplay")) {
+      chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+    }
 
     // Persist to PCCScribe web app (fire-and-forget)
     const pccClientId = files[0]?.clientId;

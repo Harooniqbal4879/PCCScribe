@@ -869,9 +869,22 @@
       scanUploadedFiles();
       chrome.storage.session.set({ triggerFileScan: Date.now() });
       setTimeout(() => {
-        loadFilesPane();
-        if (statusEl) statusEl.textContent = "";
-      }, 600);
+        chrome.storage.session.get(["pdfScanDiag", "pdfFileList"], (r) => {
+          const diag  = r.pdfScanDiag  || "";
+          const count = (r.pdfFileList || []).length;
+          if (statusEl) {
+            if (count > 0) {
+              statusEl.style.color = "#10b981";
+              statusEl.textContent = `✓ Found ${count} document${count !== 1 ? "s" : ""}`;
+            } else {
+              statusEl.style.color = "#ef4444";
+              statusEl.textContent = `Nothing found (${diag}) — try opening the Misc tab first`;
+            }
+            setTimeout(() => { if (statusEl) { statusEl.textContent = ""; statusEl.style.color = ""; } }, 6000);
+          }
+          loadFilesPane();
+        });
+      }, 700);
     });
 
     updateFilesBadge();
@@ -1367,84 +1380,128 @@
   // Misc tab, etc.), extracts up to 15 PDFs, and stores them in session storage.
 
   function scanUploadedFiles() {
-    // Scan any PCC page that has openFile() anchors (filesdisplay, Misc tab, etc.)
-    // PCC uses href="javascript:openFile(...)" on filesdisplay but
-    // onclick="openFile(...)" on the Misc tab — check both attributes.
-    const openFileAnchors = Array.from(document.querySelectorAll(
-      'a[href*="openFile"], a[onclick*="openFile"]'
-    ));
-    const viewfileAnchors = Array.from(document.querySelectorAll('a[href*="viewfile.xhtml?fileId"]'));
-    const anchors = openFileAnchors.length > 0 ? openFileAnchors : viewfileAnchors;
-    if (anchors.length === 0) return;
+    // ── Three strategies to find PCC uploaded file links ─────────────────────
+    // S1: openFile() in href or onclick  (filesdisplay.xhtml pattern)
+    // S2: viewfile.xhtml direct URL in href
+    // S3: Any <a> in a <tr> whose text is a .pdf filename (Misc tab fallback)
+    //     → extract fileId from sibling edit/del links that carry ?fileId= params
+
+    const s1 = Array.from(document.querySelectorAll('a[href*="openFile"], a[onclick*="openFile"]'));
+    const s2 = Array.from(document.querySelectorAll('a[href*="viewfile"]'));
+    const s3 = Array.from(document.querySelectorAll("tr a")).filter(a =>
+      /\.pdf\b/i.test((a.textContent || "").trim())
+    );
+
+    // Merge deduped, prefer s1 → s2 → s3
+    const seen = new Set();
+    const allAnchors = [];
+    for (const a of [...s1, ...s2, ...s3]) {
+      if (!seen.has(a)) { seen.add(a); allAnchors.push(a); }
+    }
+
+    // Store diagnostic counts for the refresh button to show
+    const diagCounts = `S1:${s1.length} S2:${s2.length} S3:${s3.length}`;
+    chrome.storage.session.set({ pdfScanDiag: diagCounts });
+
+    if (allAnchors.length === 0) return;
 
     const files = [];
-    const seen = new Set();
+    const seenIds = new Set();
 
-    for (const a of anchors) {
-      // Check both href and onclick for the openFile() call
+    for (const a of allAnchors) {
       const hrefRaw    = a.getAttribute("href")    || "";
       const onclickRaw = a.getAttribute("onclick")  || "";
-      const raw = hrefRaw + " " + onclickRaw;
+      const raw        = hrefRaw + " " + onclickRaw;
 
-      let fileId, clientId, storedName;
+      let fileId = "", clientId = "", storedName = "", fileUrl = "";
 
-      // Pattern 1: openFile('fileId','clientId','stored.pdf') in href or onclick
-      const m1 = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/);
-      if (m1) {
-        [, fileId, clientId, storedName] = m1;
-      } else {
-        // Pattern 2: viewfile.xhtml?fileId=X&clientId=Y&fileMetadataName=Z
+      // ── Pattern A: openFile('id','clientId','name.pdf') ─────────────────
+      const mA = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/i);
+      if (mA) { [, fileId, clientId, storedName] = mA; }
+
+      // ── Pattern B: viewfile.xhtml?fileId=X&clientId=Y&fileMetadataName=Z ─
+      if (!fileId && hrefRaw.includes("viewfile")) {
         try {
-          const p = new URL(hrefRaw.startsWith("http") ? hrefRaw : location.origin + hrefRaw);
-          fileId     = p.searchParams.get("fileId")            || "";
-          clientId   = p.searchParams.get("clientId")          || "";
-          storedName = p.searchParams.get("fileMetadataName")  || "";
-        } catch (_) { continue; }
+          const pu = new URL(hrefRaw.startsWith("http") ? hrefRaw : location.origin + hrefRaw);
+          fileId     = pu.searchParams.get("fileId")           || "";
+          clientId   = pu.searchParams.get("clientId")         || "";
+          storedName = pu.searchParams.get("fileMetadataName") || "";
+          fileUrl    = pu.href;
+        } catch (_) {}
       }
 
-      if (!fileId || seen.has(fileId)) continue;
-      seen.add(fileId);
+      // ── Pattern C: PDF text link — get fileId from any sibling link in row ─
+      if (!fileId && /\.pdf\b/i.test((a.textContent || "").trim())) {
+        const row = a.closest("tr");
+        if (row) {
+          // Look for sibling links that carry ?fileId= or &fileId= in their href
+          const sibling = Array.from(row.querySelectorAll("a[href]")).find(sl =>
+            /[?&]fileId=/i.test(sl.getAttribute("href") || "") ||
+            /[?&]id=/i.test(sl.getAttribute("href") || "")
+          );
+          if (sibling) {
+            try {
+              const sh = sibling.getAttribute("href") || "";
+              const su = new URL(sh.startsWith("http") ? sh : location.origin + sh);
+              fileId   = su.searchParams.get("fileId") || su.searchParams.get("id") || "";
+              clientId = su.searchParams.get("clientId") || su.searchParams.get("ESOLclientid") || "";
+            } catch (_) {}
+          }
+          // Also check data attributes on the row or cells
+          if (!fileId) {
+            const elWithData = row.querySelector("[data-file-id],[data-fileid],[data-id]");
+            if (elWithData) {
+              fileId = elWithData.dataset.fileId || elWithData.dataset.fileid || elWithData.dataset.id || "";
+            }
+          }
+        }
+        storedName = storedName || (a.textContent || "").trim();
+      }
 
-      // PDFs only
-      if (!/\.pdf$/i.test(storedName)) continue;
+      if (!fileId || seenIds.has(fileId)) continue;
+      seenIds.add(fileId);
 
-      const displayName = a.textContent.trim() || storedName;
+      const displayName = (a.textContent || "").trim() || storedName;
 
-      // Parse table row for effective date and category
+      // Must be a PDF
+      if (!/\.pdf\b/i.test(displayName) && !/\.pdf\b/i.test(storedName)) continue;
+
+      // Parse table row for date and category
       const row = a.closest("tr");
       const cells = row ? Array.from(row.querySelectorAll("td")) : [];
       const cellTexts = cells.map(td => td.textContent.trim());
-
-      // Effective date: first cell matching mm/dd/yyyy (no time)
       const dateMatch = cellTexts.find(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) || "";
 
-      // Category: first cell AFTER the anchor's cell that has no links, no dates, and is
-      // meaningful text (handles Misc tab order: edit | del | eff_date | doc | category | upload_date | uploader)
       const linkTdIdx = cells.findIndex(td => td.contains(a));
       let category = "";
       for (let ci = linkTdIdx + 1; ci < cells.length; ci++) {
         const text = cells[ci].textContent.trim();
         if (text.length < 2) continue;
-        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) continue; // skip date cells
-        if (cells[ci].querySelector("a")) continue;            // skip cells with links
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) continue;
+        if (cells[ci].querySelector("a")) continue;
         category = text;
         break;
       }
 
       const urlClientId = clientId || new URLSearchParams(location.search).get("ESOLclientid") || "";
+      if (!fileUrl) {
+        fileUrl = `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName || displayName)}`;
+      }
 
       files.push({
         fileId,
         clientId: urlClientId,
-        storedName,
+        storedName: storedName || displayName,
         displayName,
         effectiveDate: dateMatch,
         category,
-        url: `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName)}`,
+        url: fileUrl,
       });
 
       if (files.length >= 15) break;
     }
+
+    chrome.storage.session.set({ pdfScanDiag: `${diagCounts} → found:${files.length}` });
 
     if (files.length === 0) return;
 

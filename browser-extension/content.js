@@ -763,8 +763,14 @@
       filesBtn.classList.add("active");
       notesPane.classList.add("pccscribe-pane-hidden");
       filesPane.classList.remove("pccscribe-pane-hidden");
-      scanUploadedFiles();
+
+      // Show whatever is already cached immediately
       loadFilesPane();
+
+      // Trigger scan in this frame AND in all sub-frames (PCC loads Misc tab etc. in iframes).
+      // The storage-change listener in bindPanelEvents() will auto-refresh the pane when done.
+      scanUploadedFiles();
+      chrome.storage.session.set({ triggerFileScan: Date.now() });
     } else {
       filesBtn.classList.remove("active");
       notesBtn.classList.add("active");
@@ -1438,9 +1444,28 @@
   }
 
   // ─── Init ────────────────────────────────────────────────────────────────────
-  function init() { createFAB(); createPanel(); initPdfInterceptor(); scanUploadedFiles(); }
-  // Also run scanner after a short delay to catch dynamically rendered file rows
-  setTimeout(scanUploadedFiles, 1200);
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-  else init();
+  //
+  // content.js runs in ALL frames (all_frames: true in manifest).
+  // In sub-frames (PCC tab iframes): only run the file scanner — no FAB or panel.
+  // In the top frame: run the full init.
+
+  const IS_TOP_FRAME = window.self === window.top;
+
+  if (!IS_TOP_FRAME) {
+    // ── Sub-frame: only scan for uploaded files ──────────────────────────────
+    const runSubframeScan = () => { scanUploadedFiles(); setTimeout(scanUploadedFiles, 1200); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", runSubframeScan);
+    else runSubframeScan();
+
+    // Also re-scan when the top frame asks (user clicked Files tab)
+    chrome.storage.session.onChanged.addListener((changes) => {
+      if (changes.triggerFileScan) scanUploadedFiles();
+    });
+  } else {
+    // ── Top frame: full init ─────────────────────────────────────────────────
+    function init() { createFAB(); createPanel(); initPdfInterceptor(); scanUploadedFiles(); }
+    setTimeout(scanUploadedFiles, 1200);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
+  }
 })();

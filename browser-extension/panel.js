@@ -6,17 +6,19 @@ const DEFAULT_API_URL = "https://pcc.etherhealth.ai/api";
 
 // ── DOM references ─────────────────────────────────────────────────────────────
 
-const statusDot  = document.getElementById("status-dot");
-const statusText = document.getElementById("status-text");
-const idleMsg    = document.getElementById("idle-msg");
+const statusDot   = document.getElementById("status-dot");
+const statusText  = document.getElementById("status-text");
+const idleMsg     = document.getElementById("idle-msg");
 const noteSection = document.getElementById("note-section");
-const actionsEl  = document.getElementById("actions");
-const noteTextEl = document.getElementById("note-text");
-const copyBtn    = document.getElementById("copy-btn");
-const aiBtn      = document.getElementById("ai-btn");
-const aiSection  = document.getElementById("ai-section");
-const aiResponse = document.getElementById("ai-response");
-const clearAiBtn = document.getElementById("clear-ai-btn");
+const actionsEl   = document.getElementById("actions");
+const noteTextEl  = document.getElementById("note-text");
+const copyBtn     = document.getElementById("copy-btn");
+const aiBtn       = document.getElementById("ai-btn");
+const aiSection   = document.getElementById("ai-section");
+const aiResponse  = document.getElementById("ai-response");
+const clearAiBtn  = document.getElementById("clear-ai-btn");
+const filesSection = document.getElementById("files-section");
+const filesList   = document.getElementById("files-list");
 
 // ── PDF.js setup ───────────────────────────────────────────────────────────────
 
@@ -115,11 +117,68 @@ async function processPdfData(data) {
   }
 }
 
+// ── Recent Files list ──────────────────────────────────────────────────────────
+
+let currentFileList = null;
+
+function showFileList(files) {
+  if (!files || files.length === 0) {
+    filesSection.classList.add("hidden");
+    return;
+  }
+  currentFileList = files;
+  filesSection.classList.remove("hidden");
+  idleMsg.classList.add("hidden");
+
+  filesList.innerHTML = files.map((f, i) => `
+    <div class="file-item" data-idx="${i}">
+      <div class="file-icon">📄</div>
+      <div class="file-meta">
+        <div class="file-name" title="${f.displayName}">${f.displayName}</div>
+        <div class="file-date">Effective ${f.effectiveDate}${f.category ? " · " + f.category : ""}</div>
+      </div>
+      <button class="file-open-btn" data-idx="${i}">Open</button>
+    </div>
+  `).join("");
+
+  filesList.querySelectorAll(".file-open-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      openFileEntry(files[idx]);
+    });
+  });
+
+  filesList.querySelectorAll(".file-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      const idx = parseInt(item.dataset.idx);
+      openFileEntry(files[idx]);
+    });
+  });
+
+  setStatus(`${files.length} recent file${files.length !== 1 ? "s" : ""} found`, "ready");
+}
+
+function openFileEntry(file) {
+  // Send fetch request to background; panel will switch to note view on response
+  chrome.runtime.sendMessage({
+    type: "FETCH_PDF",
+    url: file.url,
+    patientId: file.patientId || null,
+  });
+  filesSection.classList.add("hidden");
+  showNoteUI(true);
+  noteTextEl.value = "";
+  aiBtn.disabled = true;
+  setStatus("⏳ Fetching " + file.displayName + "…", "loading");
+}
+
 // ── Load existing session data on panel open ───────────────────────────────────
 
 chrome.storage.session.get(
-  ["pdfDataUri", "pdfIsPdf", "pdfPatientId", "pdfStatus"],
+  ["pdfDataUri", "pdfIsPdf", "pdfPatientId", "pdfStatus", "pdfFileList"],
   (data) => {
+    if (data.pdfFileList) showFileList(data.pdfFileList);
     if (data.pdfStatus) processPdfData(data);
   }
 );
@@ -128,18 +187,23 @@ chrome.storage.session.get(
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "session") return;
-  if (!changes.pdfTimestamp) return; // only react to new fetch events
 
-  // Re-read the full set of PDF keys
-  chrome.storage.session.get(
-    ["pdfDataUri", "pdfIsPdf", "pdfPatientId", "pdfStatus"],
-    (data) => {
-      // Reset AI section when a new note arrives
-      aiSection.classList.add("hidden");
-      aiResponse.textContent = "";
-      processPdfData(data);
-    }
-  );
+  // New file list detected (user navigated to filesdisplay.xhtml)
+  if (changes.pdfFileList) {
+    showFileList(changes.pdfFileList.newValue);
+  }
+
+  // New PDF fetch triggered
+  if (changes.pdfTimestamp) {
+    chrome.storage.session.get(
+      ["pdfDataUri", "pdfIsPdf", "pdfPatientId", "pdfStatus"],
+      (data) => {
+        aiSection.classList.add("hidden");
+        aiResponse.textContent = "";
+        processPdfData(data);
+      }
+    );
+  }
 });
 
 // ── Copy button ────────────────────────────────────────────────────────────────

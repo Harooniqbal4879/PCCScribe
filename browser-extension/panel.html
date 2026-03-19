@@ -243,6 +243,90 @@
       font-size: 12px;
       line-height: 1.5;
     }
+
+    /* ── Recent Files section ────────────────────────────────────────── */
+    .files-section {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .files-section.hidden { display: none; }
+
+    .files-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .file-item {
+      background: #1e293b;
+      border: 1px solid #2d3f55;
+      border-radius: 8px;
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .file-item:hover { background: #273549; border-color: #3b82f6; }
+
+    .file-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .file-meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .file-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-date {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    .file-open-btn {
+      flex-shrink: 0;
+      background: #1e40af;
+      color: #bfdbfe;
+      border: none;
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .file-open-btn:hover { background: #1d4ed8; color: #fff; }
+
+    .back-link {
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 0;
+      margin-bottom: 4px;
+      text-align: left;
+    }
+
+    .back-link:hover { color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -261,6 +345,14 @@
   </div>
 
   <div class="content" id="main-content">
+
+    <!-- Recent Files section — shown when on PCC uploaded files page -->
+    <div class="files-section hidden" id="files-section">
+      <div class="files-header">
+        <div class="section-label">Recent Files (latest 5)</div>
+      </div>
+      <div id="files-list"></div>
+    </div>
 
     <!-- Idle state shown before any PDF is loaded -->
     <div class="idle-msg" id="idle-msg">

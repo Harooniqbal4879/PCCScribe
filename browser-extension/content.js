@@ -1212,8 +1212,65 @@
     setTimeout(() => toast.remove(), 4000);
   }
 
+  // ─── Uploaded Files scanner (filesdisplay.xhtml) ─────────────────────────────
+  // Detects the PCC "Client Uploaded Files" page, extracts the latest 5 PDFs,
+  // stores them in session storage, and opens the PALScribe side panel.
+
+  function scanUploadedFiles() {
+    if (!location.pathname.includes("filesdisplay")) return;
+
+    // All file anchors use href="javascript:openFile('fileId','clientId','stored.pdf')"
+    const anchors = Array.from(document.querySelectorAll('a[href*="openFile"]'));
+    if (anchors.length === 0) return;
+
+    const files = [];
+    const seen = new Set();
+
+    for (const a of anchors) {
+      const raw = a.getAttribute("href") || "";
+      const m = raw.match(/openFile\('(\d+)',\s*'(\d+)',\s*'([^']+)'\)/);
+      if (!m) continue;
+      const [, fileId, clientId, storedName] = m;
+      if (seen.has(fileId)) continue;
+      seen.add(fileId);
+
+      // Filter to only PDFs (skip XML, etc.)
+      if (!/\.pdf$/i.test(storedName)) continue;
+
+      const displayName = a.textContent.trim() || storedName;
+
+      // Get effective date from closest table row
+      const row = a.closest("tr");
+      const cellTexts = row ? Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim()) : [];
+      const dateMatch = cellTexts.find(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t));
+      const categoryCell = cellTexts.find(t => t.length > 3 && !/^\d/.test(t) && t !== displayName && t !== "edit" && t !== "del");
+
+      // Determine client ID from URL if not in anchor
+      const urlClientId = clientId || new URLSearchParams(location.search).get("ESOLclientid") || "";
+
+      files.push({
+        fileId,
+        clientId: urlClientId,
+        storedName,
+        displayName,
+        effectiveDate: dateMatch || "",
+        category: categoryCell || "",
+        url: `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName)}`,
+      });
+
+      if (files.length >= 5) break;
+    }
+
+    if (files.length === 0) return;
+
+    chrome.storage.session.set({ pdfFileList: files });
+    chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+  }
+
   // ─── Init ────────────────────────────────────────────────────────────────────
-  function init() { createFAB(); createPanel(); initPdfInterceptor(); }
+  function init() { createFAB(); createPanel(); initPdfInterceptor(); scanUploadedFiles(); }
+  // Also run scanner after a short delay to catch dynamically rendered file rows
+  setTimeout(scanUploadedFiles, 1200);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

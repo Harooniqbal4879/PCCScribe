@@ -1343,8 +1343,11 @@
 
   function scanUploadedFiles() {
     // Scan any PCC page that has openFile() anchors (filesdisplay, Misc tab, etc.)
-    // Also look for direct viewfile.xhtml links as a fallback
-    const openFileAnchors = Array.from(document.querySelectorAll('a[href*="openFile"]'));
+    // PCC uses href="javascript:openFile(...)" on filesdisplay but
+    // onclick="openFile(...)" on the Misc tab — check both attributes.
+    const openFileAnchors = Array.from(document.querySelectorAll(
+      'a[href*="openFile"], a[onclick*="openFile"]'
+    ));
     const viewfileAnchors = Array.from(document.querySelectorAll('a[href*="viewfile.xhtml?fileId"]'));
     const anchors = openFileAnchors.length > 0 ? openFileAnchors : viewfileAnchors;
     if (anchors.length === 0) return;
@@ -1353,19 +1356,25 @@
     const seen = new Set();
 
     for (const a of anchors) {
-      const raw = a.getAttribute("href") || "";
+      // Check both href and onclick for the openFile() call
+      const hrefRaw    = a.getAttribute("href")    || "";
+      const onclickRaw = a.getAttribute("onclick")  || "";
+      const raw = hrefRaw + " " + onclickRaw;
+
       let fileId, clientId, storedName;
 
-      // Pattern 1: javascript:openFile('fileId','clientId','stored.pdf')
+      // Pattern 1: openFile('fileId','clientId','stored.pdf') in href or onclick
       const m1 = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/);
       if (m1) {
         [, fileId, clientId, storedName] = m1;
       } else {
         // Pattern 2: viewfile.xhtml?fileId=X&clientId=Y&fileMetadataName=Z
-        const p = new URL(raw.startsWith("http") ? raw : location.origin + raw);
-        fileId    = p.searchParams.get("fileId")           || "";
-        clientId  = p.searchParams.get("clientId")         || "";
-        storedName = p.searchParams.get("fileMetadataName") || "";
+        try {
+          const p = new URL(hrefRaw.startsWith("http") ? hrefRaw : location.origin + hrefRaw);
+          fileId     = p.searchParams.get("fileId")            || "";
+          clientId   = p.searchParams.get("clientId")          || "";
+          storedName = p.searchParams.get("fileMetadataName")  || "";
+        } catch (_) { continue; }
       }
 
       if (!fileId || seen.has(fileId)) continue;

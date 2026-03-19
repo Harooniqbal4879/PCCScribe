@@ -620,16 +620,27 @@
         <button class="pccscribe-close" id="pccscribe-close-btn">✕</button>
       </div>
 
-      <div class="pccscribe-panel-body">
+      <!-- Always-visible patient bar -->
+      <div class="pccscribe-patient-bar">
+        <div id="pccscribe-detected-patient" class="pccscribe-patient-name pccscribe-undetected">Scanning...</div>
+        <div id="pccscribe-sync-status" style="font-size:11px;margin-top:3px;color:#6b7280;min-height:13px;"></div>
+      </div>
 
-        <!-- Detected Patient -->
-        <div>
-          <div class="pccscribe-label">Detected Patient</div>
-          <div id="pccscribe-detected-patient" class="pccscribe-patient-name">Scanning...</div>
-          <div id="pccscribe-sync-status" style="font-size:11px;margin-top:4px;color:#6b7280;min-height:14px;"></div>
-        </div>
+      <!-- Tab bar -->
+      <div class="pccscribe-tabs">
+        <button class="pccscribe-tab-btn active" id="pccscribe-tab-notes">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Notes
+        </button>
+        <button class="pccscribe-tab-btn" id="pccscribe-tab-files">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Files
+          <span class="pccscribe-tab-badge" id="pccscribe-files-badge" style="display:none;"></span>
+        </button>
+      </div>
 
-        <div class="pccscribe-divider"></div>
+      <!-- Notes pane -->
+      <div class="pccscribe-pane" id="pccscribe-pane-notes">
 
         <!-- Map / Select -->
         <div id="pccscribe-map-section">
@@ -719,6 +730,15 @@
           </div>
         </div>
       </div>
+
+      <!-- Files pane (hidden until Files tab selected) -->
+      <div class="pccscribe-pane pccscribe-pane-hidden" id="pccscribe-pane-files">
+        <div class="pccscribe-files-empty" id="pccscribe-files-empty">
+          <div class="pccscribe-files-empty-icon">📂</div>
+          <p>Navigate to <strong>Client Uploaded Files</strong> in PointClickCare and the latest PDFs will appear here automatically.</p>
+        </div>
+        <div id="pccscribe-files-list"></div>
+      </div>
     `;
   }
 
@@ -731,10 +751,114 @@
     bindPanelEvents();
   }
 
+  function switchTab(tabName) {
+    const notesBtn  = document.getElementById("pccscribe-tab-notes");
+    const filesBtn  = document.getElementById("pccscribe-tab-files");
+    const notesPane = document.getElementById("pccscribe-pane-notes");
+    const filesPane = document.getElementById("pccscribe-pane-files");
+    if (!notesBtn || !filesBtn || !notesPane || !filesPane) return;
+
+    if (tabName === "files") {
+      notesBtn.classList.remove("active");
+      filesBtn.classList.add("active");
+      notesPane.classList.add("pccscribe-pane-hidden");
+      filesPane.classList.remove("pccscribe-pane-hidden");
+      loadFilesPane();
+    } else {
+      filesBtn.classList.remove("active");
+      notesBtn.classList.add("active");
+      filesPane.classList.add("pccscribe-pane-hidden");
+      notesPane.classList.remove("pccscribe-pane-hidden");
+    }
+  }
+
+  function loadFilesPane() {
+    chrome.storage.session.get(["pdfFileList"], (result) => {
+      const files = result.pdfFileList || [];
+      const emptyEl = document.getElementById("pccscribe-files-empty");
+      const listEl  = document.getElementById("pccscribe-files-list");
+      if (!emptyEl || !listEl) return;
+
+      if (files.length === 0) {
+        emptyEl.style.display = "block";
+        listEl.innerHTML = "";
+        return;
+      }
+
+      emptyEl.style.display = "none";
+      listEl.innerHTML = files.map((f, i) => {
+        const name = f.displayName || f.storedName || "Document";
+        const date = f.effectiveDate ? f.effectiveDate : "";
+        const cat  = f.category || "";
+        const meta = [date, cat].filter(Boolean).join(" · ");
+        return `
+          <div class="pccscribe-file-item" data-idx="${i}">
+            <div class="pccscribe-file-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
+            <div class="pccscribe-file-info">
+              <div class="pccscribe-file-name" title="${name}">${name}</div>
+              ${meta ? `<div class="pccscribe-file-meta">${meta}</div>` : ""}
+            </div>
+            <button class="pccscribe-file-open-btn" data-idx="${i}">Open</button>
+          </div>
+        `;
+      }).join("");
+
+      listEl.querySelectorAll(".pccscribe-file-open-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.idx, 10);
+          const file = files[idx];
+          if (!file) return;
+          chrome.runtime.sendMessage({ type: "FETCH_PDF", url: file.url, fileName: file.displayName || file.storedName });
+        });
+      });
+
+      listEl.querySelectorAll(".pccscribe-file-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          const idx = parseInt(item.dataset.idx, 10);
+          const file = files[idx];
+          if (!file) return;
+          chrome.runtime.sendMessage({ type: "FETCH_PDF", url: file.url, fileName: file.displayName || file.storedName });
+        });
+      });
+    });
+  }
+
+  function updateFilesBadge() {
+    chrome.storage.session.get(["pdfFileList"], (result) => {
+      const files = result.pdfFileList || [];
+      const badge = document.getElementById("pccscribe-files-badge");
+      if (!badge) return;
+      if (files.length > 0) {
+        badge.textContent = files.length;
+        badge.style.display = "inline-flex";
+      } else {
+        badge.style.display = "none";
+      }
+    });
+  }
+
   function bindPanelEvents() {
     document.getElementById("pccscribe-close-btn").addEventListener("click", closePanel);
     document.getElementById("pccscribe-sync-btn").addEventListener("click", syncNotes);
     document.getElementById("pccscribe-patient-select").addEventListener("change", onPatientSelected);
+
+    document.getElementById("pccscribe-tab-notes").addEventListener("click", () => switchTab("notes"));
+    document.getElementById("pccscribe-tab-files").addEventListener("click", () => switchTab("files"));
+
+    updateFilesBadge();
+
+    chrome.storage.session.onChanged.addListener((changes) => {
+      if (changes.pdfFileList) {
+        updateFilesBadge();
+        const filesPane = document.getElementById("pccscribe-pane-files");
+        if (filesPane && !filesPane.classList.contains("pccscribe-pane-hidden")) {
+          loadFilesPane();
+        }
+      }
+    });
 
     document.getElementById("pccscribe-new-patient-btn").addEventListener("click", () => {
       showCreateForm();

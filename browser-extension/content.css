@@ -173,6 +173,41 @@
 }
 
 /* ── Files tab content ───────────────────────────────────────────────────── */
+.pccscribe-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.pccscribe-files-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pccscribe-files-refresh-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.pccscribe-files-scan-status {
+  font-size: 11px;
+  color: #6b7280;
+  min-height: 14px;
+  margin-bottom: 4px;
+}
+
 .pccscribe-files-empty {
   text-align: center;
   padding: 28px 16px 20px;

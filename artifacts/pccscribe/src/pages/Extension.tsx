@@ -24,7 +24,7 @@ export default function Extension() {
       number: 1,
       icon: <Download className="w-5 h-5" />,
       title: "Download the Extension",
-      description: "Download the PCCScribe + PALScribe browser extension package (.zip file).",
+      description: "Download the PCCScribe browser extension package (.zip file).",
       action: (
         <a href={`${import.meta.env.BASE_URL}pccscribe-extension.zip`} download="pccscribe-extension.zip">
           <Button className="bg-primary text-white hover:bg-primary/90 shadow-md shadow-primary/20 w-full">
@@ -147,7 +147,7 @@ export default function Extension() {
               <Badge className="bg-primary/10 text-primary border-primary/20">v1.2.0</Badge>
             </div>
             <p className="text-slate-500 mt-0.5">
-              PCCScribe + PALScribe — sync clinical notes, fetch PDFs, and view uploaded files directly from PointClickCare.
+              PCCScribe — sync clinical notes, fetch PDFs, and view uploaded files directly from PointClickCare.
             </p>
           </div>
         </div>
@@ -162,7 +162,7 @@ export default function Extension() {
           <p className="font-semibold text-slate-800 text-sm">What's new in v1.2.0</p>
           <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
             <li>• <strong>Uploaded Files sync</strong> — navigating to "Client Uploaded Files" in PCC automatically saves the latest PDFs to the web app's new Uploaded Files tab</li>
-            <li>• <strong>Recent Files panel</strong> — the PALScribe side panel now shows the 5 most recent uploaded PDFs for quick access</li>
+            <li>• <strong>Recent Files panel</strong> — the side panel now shows the 5 most recent uploaded PDFs for quick access</li>
             <li>• <strong>One-click PDF open</strong> — click any file in the Recent Files list to fetch and extract it without leaving PCC</li>
           </ul>
         </div>

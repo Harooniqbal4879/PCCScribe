@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PCCScribe",
   "version": "1.2.0",
-  "description": "Fetch clinical notes and uploaded files from PointClickCare. Sync to PCCScribe for AI summarization. Includes PALScribe PDF Fetcher with inline viewer and Claude AI summaries.",
+  "description": "Sync clinical notes and uploaded files from PointClickCare to PCCScribe for AI summarization. Includes an inline PDF viewer with text extraction and Claude AI summaries.",
   "permissions": ["storage", "activeTab", "scripting", "tabs", "sidePanel"],
   "host_permissions": [
     "*://*.pointclickcare.com/*",

@@ -733,9 +733,17 @@
 
       <!-- Files pane (hidden until Files tab selected) -->
       <div class="pccscribe-pane pccscribe-pane-hidden" id="pccscribe-pane-files">
+        <div class="pccscribe-files-header">
+          <span class="pccscribe-label" style="margin:0;">Documents on this page</span>
+          <button class="pccscribe-files-refresh-btn" id="pccscribe-files-refresh">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Refresh
+          </button>
+        </div>
+        <div id="pccscribe-files-scan-status" class="pccscribe-files-scan-status"></div>
         <div class="pccscribe-files-empty" id="pccscribe-files-empty">
           <div class="pccscribe-files-empty-icon">📂</div>
-          <p>Navigate to <strong>Client Uploaded Files</strong> in PointClickCare and the latest PDFs will appear here automatically.</p>
+          <p>Navigate to the patient's <strong>Misc tab</strong> in PointClickCare, then click <strong>Refresh</strong> above.</p>
         </div>
         <div id="pccscribe-files-list"></div>
       </div>
@@ -854,6 +862,17 @@
 
     document.getElementById("pccscribe-tab-notes").addEventListener("click", () => switchTab("notes"));
     document.getElementById("pccscribe-tab-files").addEventListener("click", () => switchTab("files"));
+
+    document.getElementById("pccscribe-files-refresh").addEventListener("click", () => {
+      const statusEl = document.getElementById("pccscribe-files-scan-status");
+      if (statusEl) { statusEl.textContent = "Scanning page for documents…"; }
+      scanUploadedFiles();
+      chrome.storage.session.set({ triggerFileScan: Date.now() });
+      setTimeout(() => {
+        loadFilesPane();
+        if (statusEl) statusEl.textContent = "";
+      }, 600);
+    });
 
     updateFilesBadge();
 

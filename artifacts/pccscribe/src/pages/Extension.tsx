@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Download, Chrome, Settings2, CheckCircle2,
   Puzzle, Globe, Clipboard, ExternalLink, ChevronRight,
-  Stethoscope, Zap, Shield
+  Stethoscope, Zap, Shield, FileText, FolderOpen,
 } from "lucide-react";
 
 const API_URL = `${window.location.origin}/api`;
@@ -24,12 +24,12 @@ export default function Extension() {
       number: 1,
       icon: <Download className="w-5 h-5" />,
       title: "Download the Extension",
-      description: "Download the PCCScribe browser extension package (.zip file).",
+      description: "Download the PCCScribe + PALScribe browser extension package (.zip file).",
       action: (
         <a href={`${import.meta.env.BASE_URL}pccscribe-extension.zip`} download="pccscribe-extension.zip">
           <Button className="bg-primary text-white hover:bg-primary/90 shadow-md shadow-primary/20 w-full">
             <Download className="w-4 h-4 mr-2" />
-            Download Extension (.zip)
+            Download Extension v1.2.0 (.zip)
           </Button>
         </a>
       ),
@@ -70,7 +70,7 @@ export default function Extension() {
             </Button>
           </div>
           <p className="text-xs text-slate-500">
-            Click the extension icon in Chrome → Settings (gear icon) → paste this URL → Save
+            Click the PCCScribe FAB button in PCC → Settings (gear icon) → paste this URL → Save
           </p>
         </div>
       ),
@@ -78,15 +78,15 @@ export default function Extension() {
     {
       number: 4,
       icon: <Globe className="w-5 h-5" />,
-      title: "Open PCC & Sync Notes",
-      description: "Navigate to PointClickCare in Chrome. The extension will automatically detect the page.",
+      title: "Sync Notes & Uploaded Files",
+      description: "Navigate to PointClickCare in Chrome. The extension detects patients, notes, and uploaded files automatically.",
       steps: [
         "Go to app.pointclickcare.com and log in",
         "Open a patient's chart",
-        "Click the blue PCCScribe button in the bottom-right corner",
-        "Select or create the matching patient in PCCScribe",
-        "Choose the note type and click Fetch & Sync Notes",
-        "Return here to generate an AI summary!",
+        "Click the blue PCCScribe button (bottom-right) to sync clinical notes",
+        'Navigate to "Client Uploaded Files" — the side panel opens automatically with the latest 5 PDFs',
+        "Click any file in the side panel to view it inline and run an AI summary",
+        "Return here — files and notes appear in the patient's Uploaded Files tab",
       ],
       action: (
         <a href="https://app.pointclickcare.com" target="_blank" rel="noopener noreferrer">
@@ -103,22 +103,32 @@ export default function Extension() {
     {
       icon: <Zap className="w-5 h-5 text-amber-500" />,
       title: "Auto-Detection",
-      description: "Automatically identifies patient name and note type from the PCC page",
+      description: "Automatically identifies patient, note type, allergies, code status, and clinical profile from any PCC page",
+    },
+    {
+      icon: <FileText className="w-5 h-5 text-blue-500" />,
+      title: "PDF Side Panel",
+      description: "Click any note or document link in PCC — the side panel fetches and renders it inline with text extraction",
+    },
+    {
+      icon: <FolderOpen className="w-5 h-5 text-violet-500" />,
+      title: "Uploaded Files Sync",
+      description: "Navigating to Client Uploaded Files automatically saves the latest PDFs to the web app",
     },
     {
       icon: <Shield className="w-5 h-5 text-green-500" />,
       title: "Secure & Private",
-      description: "Notes go directly from your browser to your PCCScribe instance — no third parties",
+      description: "Notes and files go directly from your browser to your PCCScribe instance — no third parties",
     },
     {
-      icon: <Puzzle className="w-5 h-5 text-violet-500" />,
+      icon: <Puzzle className="w-5 h-5 text-orange-500" />,
       title: "All Note Types",
-      description: "Supports progress notes, orders, MAR, care plans, nursing notes, and more",
+      description: "Supports progress notes, orders, MAR, care plans, nursing notes, therapy notes, and more",
     },
     {
       icon: <Stethoscope className="w-5 h-5 text-primary" />,
       title: "AI Summaries",
-      description: "Synced notes are ready to generate SOAP summaries with a single click",
+      description: "Synced notes and PDFs can be summarized with Claude AI — SOAP format, chat, or free-form",
     },
   ];
 
@@ -131,19 +141,35 @@ export default function Extension() {
             <Puzzle className="w-6 h-6 text-primary" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-3xl font-display font-bold text-slate-900">Browser Extension</h1>
               <Badge className="bg-green-100 text-green-700 border-green-200">Chrome</Badge>
+              <Badge className="bg-primary/10 text-primary border-primary/20">v1.2.0</Badge>
             </div>
             <p className="text-slate-500 mt-0.5">
-              Fetch clinical notes directly from PointClickCare and sync them to PCCScribe in one click.
+              PCCScribe + PALScribe — sync clinical notes, fetch PDFs, and view uploaded files directly from PointClickCare.
             </p>
           </div>
         </div>
       </div>
 
+      {/* What's new banner */}
+      <div className="mb-8 bg-primary/5 border border-primary/15 rounded-2xl p-4 flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+          <Zap className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <p className="font-semibold text-slate-800 text-sm">What's new in v1.2.0</p>
+          <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+            <li>• <strong>Uploaded Files sync</strong> — navigating to "Client Uploaded Files" in PCC automatically saves the latest PDFs to the web app's new Uploaded Files tab</li>
+            <li>• <strong>Recent Files panel</strong> — the PALScribe side panel now shows the 5 most recent uploaded PDFs for quick access</li>
+            <li>• <strong>One-click PDF open</strong> — click any file in the Recent Files list to fetch and extract it without leaving PCC</li>
+          </ul>
+        </div>
+      </div>
+
       {/* Features */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
         {features.map((f) => (
           <div key={f.title} className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm">
             <div className="w-9 h-9 rounded-lg bg-slate-50 flex items-center justify-center mb-3">
@@ -164,7 +190,6 @@ export default function Extension() {
             className="bg-white border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm"
           >
             <div className="flex items-start gap-4 p-6">
-              {/* Step number + connector */}
               <div className="flex flex-col items-center shrink-0">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm border-2 border-primary/20">
                   {step.number}
@@ -217,7 +242,7 @@ export default function Extension() {
         </div>
         <div className="flex-1">
           <p className="font-semibold text-slate-900 text-sm">All set? Generate your first summary</p>
-          <p className="text-xs text-slate-500 mt-0.5">After syncing notes, open a patient and click Generate Summary to run AI analysis.</p>
+          <p className="text-xs text-slate-500 mt-0.5">After syncing notes or opening a PDF, use the AI Summary or Ask AI tab to run Claude analysis.</p>
         </div>
         <a href="/">
           <Button variant="outline" size="sm" className="border-slate-200 shrink-0">

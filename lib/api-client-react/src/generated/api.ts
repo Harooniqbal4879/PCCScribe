@@ -25,6 +25,9 @@ import type {
   HealthStatus,
   IngestNotesBody,
   Patient,
+  PccUploadedFile,
+  SaveFilesBody,
+  SavePatientFiles201,
   Summary,
   SyncPatientResponse,
 } from "./api.schemas";
@@ -1235,4 +1238,180 @@ export const useDeleteSummary = <
   TContext
 > => {
   return useMutation(getDeleteSummaryMutationOptions(options));
+};
+
+/**
+ * @summary List uploaded files for a patient
+ */
+export const getListPatientFilesUrl = (patientId: number) => {
+  return `/api/patients/${patientId}/files`;
+};
+
+export const listPatientFiles = async (
+  patientId: number,
+  options?: RequestInit,
+): Promise<PccUploadedFile[]> => {
+  return customFetch<PccUploadedFile[]>(getListPatientFilesUrl(patientId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPatientFilesQueryKey = (patientId: number) => {
+  return [`/api/patients/${patientId}/files`] as const;
+};
+
+export const getListPatientFilesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPatientFiles>>,
+  TError = ErrorType<unknown>,
+>(
+  patientId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPatientFiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListPatientFilesQueryKey(patientId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPatientFiles>>
+  > = ({ signal }) =>
+    listPatientFiles(patientId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!patientId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPatientFiles>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListPatientFilesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPatientFiles>>
+>;
+export type ListPatientFilesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List uploaded files for a patient
+ */
+
+export function useListPatientFiles<
+  TData = Awaited<ReturnType<typeof listPatientFiles>>,
+  TError = ErrorType<unknown>,
+>(
+  patientId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPatientFiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListPatientFilesQueryOptions(patientId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Bulk upsert uploaded files for a patient
+ */
+export const getSavePatientFilesUrl = (patientId: number) => {
+  return `/api/patients/${patientId}/files`;
+};
+
+export const savePatientFiles = async (
+  patientId: number,
+  saveFilesBody: SaveFilesBody,
+  options?: RequestInit,
+): Promise<SavePatientFiles201> => {
+  return customFetch<SavePatientFiles201>(getSavePatientFilesUrl(patientId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(saveFilesBody),
+  });
+};
+
+export const getSavePatientFilesMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePatientFiles>>,
+    TError,
+    { patientId: number; data: BodyType<SaveFilesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof savePatientFiles>>,
+  TError,
+  { patientId: number; data: BodyType<SaveFilesBody> },
+  TContext
+> => {
+  const mutationKey = ["savePatientFiles"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof savePatientFiles>>,
+    { patientId: number; data: BodyType<SaveFilesBody> }
+  > = (props) => {
+    const { patientId, data } = props ?? {};
+
+    return savePatientFiles(patientId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SavePatientFilesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof savePatientFiles>>
+>;
+export type SavePatientFilesMutationBody = BodyType<SaveFilesBody>;
+export type SavePatientFilesMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Bulk upsert uploaded files for a patient
+ */
+export const useSavePatientFiles = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePatientFiles>>,
+    TError,
+    { patientId: number; data: BodyType<SaveFilesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof savePatientFiles>>,
+  TError,
+  { patientId: number; data: BodyType<SaveFilesBody> },
+  TContext
+> => {
+  return useMutation(getSavePatientFilesMutationOptions(options));
 };

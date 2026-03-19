@@ -1265,6 +1265,12 @@
 
     chrome.storage.session.set({ pdfFileList: files });
     chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+
+    // Persist to PCCScribe web app (fire-and-forget)
+    const pccClientId = files[0]?.clientId;
+    if (pccClientId) {
+      chrome.runtime.sendMessage({ type: "SAVE_FILES", files, pccClientId });
+    }
   }
 
   // ─── Init ────────────────────────────────────────────────────────────────────

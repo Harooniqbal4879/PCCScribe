@@ -9,6 +9,34 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface PccUploadedFile {
+  id: number;
+  patientId: number;
+  pccFileId: string;
+  pccClientId: string;
+  storedName: string;
+  displayName: string;
+  effectiveDate?: string | null;
+  category?: string | null;
+  fileUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SaveFilesBodyFilesItem = {
+  fileId: string;
+  clientId: string;
+  storedName: string;
+  displayName: string;
+  effectiveDate?: string;
+  category?: string;
+  url: string;
+};
+
+export interface SaveFilesBody {
+  files: SaveFilesBodyFilesItem[];
+}
+
 export interface ErrorResponse {
   error: string;
   message?: string;
@@ -265,4 +293,9 @@ export interface GenerateSummaryBody {
 export type CreatePatientNotes201 = {
   inserted: number;
   noteIds: number[];
+};
+
+export type SavePatientFiles201 = {
+  saved: number;
+  files: PccUploadedFile[];
 };

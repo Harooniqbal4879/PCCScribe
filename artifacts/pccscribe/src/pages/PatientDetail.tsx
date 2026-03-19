@@ -7,6 +7,7 @@ import {
   useListPatientNotes,
   useListPatientSummaries,
   useCreatePatientNotes,
+  useListPatientFiles,
 } from "@workspace/api-client-react";
 import { Layout } from "@/components/Layout";
 import { GenerateSummaryModal } from "@/components/GenerateSummaryModal";
@@ -19,7 +20,7 @@ import {
   User, Building2, Puzzle, CheckCircle2, AlertCircle,
   Stethoscope, Heart, Phone, Utensils, ClipboardList,
   Activity, ShieldAlert, Info, UserRound, Hash, Loader2,
-  MessageSquare, Send, Bot, ExternalLink,
+  MessageSquare, Send, Bot, ExternalLink, FolderOpen,
 } from "lucide-react";
 import { useRef, useEffect } from "react";
 import { formatNoteType } from "@/lib/utils";
@@ -181,6 +182,7 @@ export default function PatientDetail() {
   const { data: patient, isLoading: patientLoading } = useGetPatient(patientId);
   const { data: notes, isLoading: notesLoading } = useListPatientNotes(patientId);
   const { data: summaries, isLoading: summariesLoading } = useListPatientSummaries(patientId);
+  const { data: uploadedFiles } = useListPatientFiles(patientId);
   const ingestMutation = useCreatePatientNotes();
 
   const handleSimulateIngest = () => {
@@ -354,6 +356,17 @@ export default function PatientDetail() {
             className="rounded-lg px-5 py-2.5 data-[state=active]:bg-slate-100 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all font-medium"
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Ask AI
+          </TabsTrigger>
+          <TabsTrigger
+            value="files"
+            className="rounded-lg px-5 py-2.5 data-[state=active]:bg-slate-100 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all font-medium"
+          >
+            <FolderOpen className="w-4 h-4 mr-2" /> Uploaded Files
+            {uploadedFiles && uploadedFiles.length > 0 && (
+              <Badge variant="secondary" className="ml-2 bg-white text-slate-500">
+                {uploadedFiles.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -808,6 +821,65 @@ export default function PatientDetail() {
                     {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </Button>
                 </form>
+              </Card>
+            </TabsContent>
+
+            {/* ── Uploaded Files tab ─────────────────────────────────── */}
+            <TabsContent value="files" className="m-0 border-none outline-none">
+              <Card className="shadow-sm border border-slate-200/60">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg font-display text-slate-800">
+                      PCC Uploaded Files
+                    </CardTitle>
+                    <span className="text-xs text-slate-400">
+                      Synced automatically by the Chrome extension
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {uploadedFiles && uploadedFiles.length > 0 ? (
+                    <div className="space-y-2">
+                      {uploadedFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <FileText className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm text-slate-800 truncate">
+                                {file.displayName}
+                              </div>
+                              <div className="text-xs text-slate-400 mt-0.5">
+                                {file.effectiveDate && <>Effective {file.effectiveDate}</>}
+                                {file.category && <> &middot; {file.category}</>}
+                              </div>
+                            </div>
+                          </div>
+                          <a
+                            href={file.fileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-3 flex-shrink-0"
+                          >
+                            <Button variant="outline" size="sm" className="text-xs">
+                              <ExternalLink className="w-3 h-3 mr-1" /> Open in PCC
+                            </Button>
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <FolderOpen className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+                      <p className="text-sm font-medium text-slate-500 mb-1">No uploaded files yet</p>
+                      <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                        Navigate to the "Client Uploaded Files" tab in PointClickCare. The extension will detect the files and save them here automatically.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
               </Card>
             </TabsContent>
           </motion.div>

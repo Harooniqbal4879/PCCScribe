@@ -333,6 +333,60 @@ paths:
         "204":
           description: Summary deleted
 
+  /patients/{patientId}/files:
+    get:
+      operationId: listPatientFiles
+      tags: [files]
+      summary: List uploaded files for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of uploaded files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PccUploadedFile"
+    post:
+      operationId: savePatientFiles
+      tags: [files]
+      summary: Bulk upsert uploaded files for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFilesBody"
+      responses:
+        "201":
+          description: Files saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  saved:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PccUploadedFile"
+                required:
+                  - saved
+                  - files
+
 components:
   schemas:
     HealthStatus:
@@ -342,6 +396,75 @@ components:
           type: string
       required:
         - status
+
+    PccUploadedFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        pccFileId:
+          type: string
+        pccClientId:
+          type: string
+        storedName:
+          type: string
+        displayName:
+          type: string
+        effectiveDate:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        fileUrl:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - patientId
+        - pccFileId
+        - pccClientId
+        - storedName
+        - displayName
+        - fileUrl
+        - createdAt
+        - updatedAt
+
+    SaveFilesBody:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              fileId:
+                type: string
+              clientId:
+                type: string
+              storedName:
+                type: string
+              displayName:
+                type: string
+              effectiveDate:
+                type: string
+              category:
+                type: string
+              url:
+                type: string
+            required:
+              - fileId
+              - clientId
+              - storedName
+              - displayName
+              - url
+      required:
+        - files
 
     ErrorResponse:
       type: object

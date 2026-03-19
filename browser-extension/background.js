@@ -67,6 +67,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return false;
   }
+
+  if (message.type === "SAVE_FILES") {
+    handleSaveFiles(message).catch((e) =>
+      console.error("[PALScribe] SAVE_FILES error:", e)
+    );
+    return false;
+  }
 });
 
 async function handleCheckConnection() {
@@ -306,6 +313,31 @@ async function handleFetchPdf(message, sender) {
     console.error("[PCCScribe] PDF fetch error:", err);
     sendToast("Could not load note — session may have expired");
     await chrome.storage.session.set({ pdfStatus: "error", pdfError: err.message });
+  }
+}
+
+async function handleSaveFiles({ files, pccClientId }) {
+  const { apiUrl } = await getConfig();
+  try {
+    // Find the PCCScribe patient whose pccInternalId matches the PCC clientId
+    const patientsRes = await fetch(`${apiUrl}/patients`);
+    if (!patientsRes.ok) throw new Error(`Patients fetch failed: HTTP ${patientsRes.status}`);
+    const patients = await patientsRes.json();
+    const patient = patients.find((p) => p.pccInternalId === String(pccClientId));
+    if (!patient) {
+      console.log("[PALScribe] SAVE_FILES: no PCCScribe patient for pccClientId", pccClientId);
+      return;
+    }
+    const saveRes = await fetch(`${apiUrl}/patients/${patient.id}/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files }),
+    });
+    if (!saveRes.ok) throw new Error(`Save files failed: HTTP ${saveRes.status}`);
+    const result = await saveRes.json();
+    console.log(`[PALScribe] SAVE_FILES: saved ${result.saved} files for patient ${patient.id}`);
+  } catch (err) {
+    console.error("[PALScribe] SAVE_FILES error:", err);
   }
 }
 

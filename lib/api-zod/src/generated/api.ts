@@ -540,3 +540,46 @@ export const DeleteSummaryParams = zod.object({
   patientId: zod.coerce.number(),
   summaryId: zod.coerce.number(),
 });
+
+/**
+ * @summary List uploaded files for a patient
+ */
+export const ListPatientFilesParams = zod.object({
+  patientId: zod.coerce.number(),
+});
+
+export const ListPatientFilesResponseItem = zod.object({
+  id: zod.number(),
+  patientId: zod.number(),
+  pccFileId: zod.string(),
+  pccClientId: zod.string(),
+  storedName: zod.string(),
+  displayName: zod.string(),
+  effectiveDate: zod.string().nullish(),
+  category: zod.string().nullish(),
+  fileUrl: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+export const ListPatientFilesResponse = zod.array(ListPatientFilesResponseItem);
+
+/**
+ * @summary Bulk upsert uploaded files for a patient
+ */
+export const SavePatientFilesParams = zod.object({
+  patientId: zod.coerce.number(),
+});
+
+export const SavePatientFilesBody = zod.object({
+  files: zod.array(
+    zod.object({
+      fileId: zod.string(),
+      clientId: zod.string(),
+      storedName: zod.string(),
+      displayName: zod.string(),
+      effectiveDate: zod.string().optional(),
+      category: zod.string().optional(),
+      url: zod.string(),
+    }),
+  ),
+});

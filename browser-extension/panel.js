@@ -105,14 +105,26 @@ async function processPdfData(data) {
         text = extractHtmlText(pdfDataUri);
       }
 
-      extractedText = text || "(No readable text found in this note)";
-      noteTextEl.value = extractedText;
+      extractedText = text || "";
+      noteTextEl.value = extractedText || "(No readable text found in this note)";
       aiBtn.disabled = extractedText.length < 10;
-      setStatus(`✓ Text extracted — ${extractedText.length.toLocaleString()} chars`, "ready");
+      const charCount = extractedText.length.toLocaleString();
+      setStatus(
+        extractedText.length > 0
+          ? `✓ Text extracted — ${charCount} chars`
+          : "⚠ No text layer found (scanned document)",
+        extractedText.length > 0 ? "ready" : "error"
+      );
+      // Save to session storage so the FAB panel file detail view can read it
+      chrome.storage.session.set({
+        pdfExtractedText: extractedText,
+        pdfExtractedCharCount: extractedText.length,
+      });
     } catch (err) {
       console.error("[PALScribe] text extraction failed:", err);
       setStatus("Text extraction failed: " + err.message, "error");
       noteTextEl.value = "";
+      chrome.storage.session.set({ pdfExtractedText: "", pdfExtractedCharCount: 0 });
     }
   }
 }

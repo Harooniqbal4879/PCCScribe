@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { pccUploadedFilesTable, patientsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router({ mergeParams: true });
 
@@ -99,6 +99,38 @@ router.post("/", async (req, res) => {
     }
 
     return res.status(201).json({ saved: saved.length, files: saved.map(serializeFile) });
+  } catch (err) {
+    return res.status(500).json({ error: "internal_error", message: String(err) });
+  }
+});
+
+// PATCH /patients/:patientId/files/:pccFileId/content — save extracted text
+router.patch("/:pccFileId/content", async (req, res) => {
+  const patientId = parseInt(req.params.patientId);
+  const { pccFileId } = req.params;
+  const { extractedContent } = req.body as { extractedContent: string };
+
+  if (isNaN(patientId) || !pccFileId) {
+    return res.status(400).json({ error: "invalid_params" });
+  }
+  if (typeof extractedContent !== "string") {
+    return res.status(400).json({ error: "extractedContent_required" });
+  }
+
+  try {
+    const [updated] = await db
+      .update(pccUploadedFilesTable)
+      .set({ extractedContent, updatedAt: new Date() })
+      .where(
+        and(
+          eq(pccUploadedFilesTable.patientId, patientId),
+          eq(pccUploadedFilesTable.pccFileId, pccFileId)
+        )
+      )
+      .returning();
+
+    if (!updated) return res.status(404).json({ error: "file_not_found" });
+    return res.json(serializeFile(updated));
   } catch (err) {
     return res.status(500).json({ error: "internal_error", message: String(err) });
   }

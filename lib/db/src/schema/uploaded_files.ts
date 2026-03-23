@@ -22,6 +22,7 @@ export const pccUploadedFilesTable = pgTable(
     effectiveDate: text("effective_date"),
     category: text("category"),
     fileUrl: text("file_url").notNull(),
+    extractedContent: text("extracted_content"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

@@ -77,7 +77,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "SCAN_FOR_FILES") {
     handleScanForFiles(sender).then(sendResponse);
-    return true; // keep channel open for async response
+    return true;
+  }
+
+  if (message.type === "SAVE_FILE_CONTENT") {
+    handleSaveFileContent(message).then(sendResponse);
+    return true;
   }
 });
 
@@ -308,7 +313,15 @@ async function handleFetchPdf(message, sender) {
       pdfPatientId: patientId || null,
       pdfStatus: "ready",
       pdfTimestamp: Date.now(),
+      // Clear any prior extracted text so the FAB panel shows fresh loading state
+      pdfExtractedText: null,
+      pdfExtractedFileName: message.fileName || null,
     });
+
+    // Open the side panel so PDF.js extraction runs, then result flows back to FAB panel
+    if (sender.tab?.windowId) {
+      chrome.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
+    }
 
     // Tell the content script to show the inline PDF viewer
     if (tabId) {
@@ -343,6 +356,29 @@ async function handleSaveFiles({ files, pccClientId }) {
     console.log(`[PALScribe] SAVE_FILES: saved ${result.saved} files for patient ${patient.id}`);
   } catch (err) {
     console.error("[PALScribe] SAVE_FILES error:", err);
+  }
+}
+
+async function handleSaveFileContent({ pccClientId, pccFileId, extractedContent }) {
+  const { apiUrl } = await getConfig();
+  try {
+    // Resolve PCCScribe internal patient ID from the PCC clientId
+    const patientsRes = await fetch(`${apiUrl}/patients`);
+    if (!patientsRes.ok) throw new Error(`Patients fetch: HTTP ${patientsRes.status}`);
+    const patients = await patientsRes.json();
+    const patient = patients.find((p) => p.pccInternalId === String(pccClientId));
+    if (!patient) return { success: false, error: "Patient not found in PCCScribe" };
+
+    const res = await fetch(`${apiUrl}/patients/${patient.id}/files/${pccFileId}/content`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extractedContent }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return { success: true, file: data };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 }
 

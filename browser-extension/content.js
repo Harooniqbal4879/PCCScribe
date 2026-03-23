@@ -733,19 +733,44 @@
 
       <!-- Files pane (hidden until Files tab selected) -->
       <div class="pccscribe-pane pccscribe-pane-hidden" id="pccscribe-pane-files">
-        <div class="pccscribe-files-header">
-          <span class="pccscribe-label" style="margin:0;">Documents on this page</span>
-          <button class="pccscribe-files-refresh-btn" id="pccscribe-files-refresh">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Refresh
-          </button>
+
+        <!-- ── List view (default) ───────────────────────────────────── -->
+        <div id="pccscribe-files-list-view">
+          <div class="pccscribe-files-header">
+            <span class="pccscribe-label" style="margin:0;">Documents on this page</span>
+            <button class="pccscribe-files-refresh-btn" id="pccscribe-files-refresh">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="pccscribe-files-scan-status" class="pccscribe-files-scan-status"></div>
+          <div class="pccscribe-files-empty" id="pccscribe-files-empty">
+            <div class="pccscribe-files-empty-icon">📂</div>
+            <p>Navigate to the patient's <strong>Misc tab</strong> in PointClickCare, then click <strong>Refresh</strong> above.</p>
+          </div>
+          <div id="pccscribe-files-list"></div>
         </div>
-        <div id="pccscribe-files-scan-status" class="pccscribe-files-scan-status"></div>
-        <div class="pccscribe-files-empty" id="pccscribe-files-empty">
-          <div class="pccscribe-files-empty-icon">📂</div>
-          <p>Navigate to the patient's <strong>Misc tab</strong> in PointClickCare, then click <strong>Refresh</strong> above.</p>
+
+        <!-- ── File detail view (shown after clicking a document) ──── -->
+        <div id="pccscribe-file-detail" style="display:none; flex-direction:column; height:100%; overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:6px; padding:8px 10px 6px; border-bottom:1px solid #1e293b; flex-shrink:0;">
+            <button id="pccscribe-file-back-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;padding:2px 4px;display:flex;align-items:center;gap:4px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              Files
+            </button>
+            <span id="pccscribe-file-detail-name" style="font-size:11px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></span>
+          </div>
+          <div id="pccscribe-file-detail-meta" style="font-size:10px;color:#6b7280;padding:4px 10px;flex-shrink:0;"></div>
+          <div id="pccscribe-file-extract-status" style="font-size:10px;color:#94a3b8;padding:2px 10px 4px;flex-shrink:0;"></div>
+          <textarea id="pccscribe-file-text" readonly placeholder="Extracting text from document…" style="flex:1;min-height:160px;resize:none;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:4px;margin:0 8px;padding:8px;font-size:11px;line-height:1.5;font-family:inherit;overflow-y:auto;"></textarea>
+          <div style="padding:8px 10px;display:flex;gap:6px;flex-direction:column;flex-shrink:0;">
+            <button id="pccscribe-file-save-btn" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+              💾 Save to PCCScribe
+            </button>
+            <div id="pccscribe-file-save-status" style="font-size:10px;text-align:center;color:#6b7280;min-height:14px;"></div>
+          </div>
         </div>
-        <div id="pccscribe-files-list"></div>
+
       </div>
     `;
   }
@@ -824,21 +849,65 @@
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           const idx = parseInt(btn.dataset.idx, 10);
-          const file = files[idx];
-          if (!file) return;
-          chrome.runtime.sendMessage({ type: "FETCH_PDF", url: file.url, fileName: file.displayName || file.storedName });
+          openFileDetail(files[idx]);
         });
       });
 
       listEl.querySelectorAll(".pccscribe-file-item").forEach((item) => {
         item.addEventListener("click", () => {
           const idx = parseInt(item.dataset.idx, 10);
-          const file = files[idx];
-          if (!file) return;
-          chrome.runtime.sendMessage({ type: "FETCH_PDF", url: file.url, fileName: file.displayName || file.storedName });
+          openFileDetail(files[idx]);
         });
       });
     });
+  }
+
+  // ─── File detail view ────────────────────────────────────────────────────────
+
+  let _currentOpenFile = null;
+
+  function openFileDetail(file) {
+    if (!file) return;
+    _currentOpenFile = file;
+
+    // Switch list → detail
+    const listView   = document.getElementById("pccscribe-files-list-view");
+    const detailView = document.getElementById("pccscribe-file-detail");
+    if (listView)   listView.style.display   = "none";
+    if (detailView) detailView.style.display = "flex";
+
+    // Populate header
+    const nameEl = document.getElementById("pccscribe-file-detail-name");
+    const metaEl = document.getElementById("pccscribe-file-detail-meta");
+    const statusEl = document.getElementById("pccscribe-file-extract-status");
+    const textEl  = document.getElementById("pccscribe-file-text");
+    const saveBtn = document.getElementById("pccscribe-file-save-btn");
+    const saveStatus = document.getElementById("pccscribe-file-save-status");
+
+    if (nameEl) nameEl.textContent = file.displayName || file.storedName || "Document";
+    if (metaEl) metaEl.textContent = [file.effectiveDate, file.category].filter(Boolean).join(" · ");
+    if (statusEl) { statusEl.style.color = "#94a3b8"; statusEl.textContent = "Extracting text via side panel…"; }
+    if (textEl)  { textEl.value = ""; textEl.placeholder = "Extracting text from document…"; }
+    if (saveBtn) saveBtn.disabled = true;
+    if (saveStatus) saveStatus.textContent = "";
+
+    // Store current file so session storage listener can match it
+    chrome.storage.session.set({ pdfExtractedText: null, pdfExtractedFileName: file.displayName || "" });
+
+    // Trigger PDF fetch (background opens side panel + extracts text)
+    chrome.runtime.sendMessage({
+      type: "FETCH_PDF",
+      url: file.url,
+      fileName: file.displayName || file.storedName,
+    });
+  }
+
+  function showFileListView() {
+    _currentOpenFile = null;
+    const listView   = document.getElementById("pccscribe-files-list-view");
+    const detailView = document.getElementById("pccscribe-file-detail");
+    if (listView)   listView.style.display   = "";
+    if (detailView) detailView.style.display = "none";
   }
 
   function updateFilesBadge() {
@@ -862,6 +931,39 @@
 
     document.getElementById("pccscribe-tab-notes").addEventListener("click", () => switchTab("notes"));
     document.getElementById("pccscribe-tab-files").addEventListener("click", () => switchTab("files"));
+
+    // ── File detail view — back button ─────────────────────────────────────
+    document.getElementById("pccscribe-file-back-btn").addEventListener("click", () => {
+      showFileListView();
+    });
+
+    // ── File detail view — Save to PCCScribe ──────────────────────────────
+    document.getElementById("pccscribe-file-save-btn").addEventListener("click", () => {
+      if (!_currentOpenFile) return;
+      const textEl     = document.getElementById("pccscribe-file-text");
+      const saveStatus = document.getElementById("pccscribe-file-save-status");
+      const saveBtn    = document.getElementById("pccscribe-file-save-btn");
+      const extractedContent = textEl?.value || "";
+      if (saveStatus) { saveStatus.style.color = "#94a3b8"; saveStatus.textContent = "Saving…"; }
+      if (saveBtn)  saveBtn.disabled = true;
+      chrome.runtime.sendMessage({
+        type: "SAVE_FILE_CONTENT",
+        pccClientId: _currentOpenFile.clientId,
+        pccFileId:   _currentOpenFile.fileId,
+        extractedContent,
+      }, (resp) => {
+        if (saveStatus) {
+          if (resp?.success) {
+            saveStatus.style.color = "#10b981";
+            saveStatus.textContent = "✓ Saved to PCCScribe";
+          } else {
+            saveStatus.style.color = "#ef4444";
+            saveStatus.textContent = "Save failed: " + (resp?.error || "unknown error");
+            if (saveBtn) saveBtn.disabled = false;
+          }
+        }
+      });
+    });
 
     document.getElementById("pccscribe-files-refresh").addEventListener("click", () => {
       const statusEl = document.getElementById("pccscribe-files-scan-status");
@@ -894,6 +996,28 @@
         if (filesPane && !filesPane.classList.contains("pccscribe-pane-hidden")) {
           loadFilesPane();
         }
+      }
+
+      // Side panel finished extracting text — update the file detail view
+      if (changes.pdfExtractedText && _currentOpenFile) {
+        const text      = changes.pdfExtractedText.newValue || "";
+        const textEl    = document.getElementById("pccscribe-file-text");
+        const statusEl  = document.getElementById("pccscribe-file-extract-status");
+        const saveBtn   = document.getElementById("pccscribe-file-save-btn");
+        if (textEl) {
+          textEl.value = text || "";
+          textEl.placeholder = text ? "" : "No text layer found — this may be a scanned document";
+        }
+        if (statusEl) {
+          if (text.length > 0) {
+            statusEl.style.color = "#10b981";
+            statusEl.textContent = `✓ ${text.length.toLocaleString()} characters extracted`;
+          } else {
+            statusEl.style.color = "#f59e0b";
+            statusEl.textContent = "⚠ No text layer found (scanned image document)";
+          }
+        }
+        if (saveBtn) saveBtn.disabled = false;
       }
     });
 

@@ -56,6 +56,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Open a PCC file URL in a new foreground tab — used by the Files tab "Open" button
+  // and the "Open PDF in new tab" button in the file detail view.
+  if (message.type === "OPEN_FILE_TAB") {
+    if (message.url) chrome.tabs.create({ url: message.url, active: true });
+    return false;
+  }
+
   if (message.type === "FETCH_PDF") {
     handleFetchPdf(message, sender);
     return false; // fire-and-forget; replies come as separate messages

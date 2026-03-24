@@ -761,8 +761,14 @@
             <span id="pccscribe-file-detail-name" style="font-size:11px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></span>
           </div>
           <div id="pccscribe-file-detail-meta" style="font-size:10px;color:#6b7280;padding:4px 10px;flex-shrink:0;"></div>
+          <div style="padding:4px 8px 6px;flex-shrink:0;">
+            <button id="pccscribe-file-open-pdf-btn" style="width:100%;padding:7px;background:#0f172a;color:#94a3b8;border:1px solid #334155;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Open PDF in new tab
+            </button>
+          </div>
           <div id="pccscribe-file-extract-status" style="font-size:10px;color:#94a3b8;padding:2px 10px 4px;flex-shrink:0;"></div>
-          <textarea id="pccscribe-file-text" readonly placeholder="Extracting text from document…" style="flex:1;min-height:160px;resize:none;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:4px;margin:0 8px;padding:8px;font-size:11px;line-height:1.5;font-family:inherit;overflow-y:auto;"></textarea>
+          <textarea id="pccscribe-file-text" readonly placeholder="Open the PDF, then paste or extract text here…" style="flex:1;min-height:120px;resize:none;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:4px;margin:0 8px;padding:8px;font-size:11px;line-height:1.5;font-family:inherit;overflow-y:auto;"></textarea>
           <div style="padding:8px 10px;display:flex;gap:6px;flex-direction:column;flex-shrink:0;">
             <button id="pccscribe-file-save-btn" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
               💾 Save to PCCScribe
@@ -845,16 +851,20 @@
         `;
       }).join("");
 
+      // "Open" button → open the PCC PDF viewer in a new tab (same as clicking Open in PCC)
       listEl.querySelectorAll(".pccscribe-file-open-btn").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           const idx = parseInt(btn.dataset.idx, 10);
-          openFileDetail(files[idx]);
+          const file = files[idx];
+          if (file?.url) chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
         });
       });
 
+      // Clicking the row body → show the file detail view
       listEl.querySelectorAll(".pccscribe-file-item").forEach((item) => {
-        item.addEventListener("click", () => {
+        item.addEventListener("click", (e) => {
+          if (e.target.closest(".pccscribe-file-open-btn")) return;
           const idx = parseInt(item.dataset.idx, 10);
           openFileDetail(files[idx]);
         });
@@ -886,20 +896,18 @@
 
     if (nameEl) nameEl.textContent = file.displayName || file.storedName || "Document";
     if (metaEl) metaEl.textContent = [file.effectiveDate, file.category].filter(Boolean).join(" · ");
-    if (statusEl) { statusEl.style.color = "#94a3b8"; statusEl.textContent = "Extracting text via side panel…"; }
-    if (textEl)  { textEl.value = ""; textEl.placeholder = "Extracting text from document…"; }
-    if (saveBtn) saveBtn.disabled = true;
+    if (statusEl) { statusEl.textContent = ""; }
+    if (textEl)  { textEl.value = ""; textEl.placeholder = "Open the PDF, then paste or extract text here…"; }
+    if (saveBtn) saveBtn.disabled = false;
     if (saveStatus) saveStatus.textContent = "";
 
-    // Store current file so session storage listener can match it
-    chrome.storage.session.set({ pdfExtractedText: null, pdfExtractedFileName: file.displayName || "" });
-
-    // Trigger PDF fetch (background opens side panel + extracts text)
-    chrome.runtime.sendMessage({
-      type: "FETCH_PDF",
-      url: file.url,
-      fileName: file.displayName || file.storedName,
-    });
+    // Wire "Open PDF in new tab" button with the correct URL for this file
+    const openPdfBtn = document.getElementById("pccscribe-file-open-pdf-btn");
+    if (openPdfBtn) {
+      openPdfBtn.onclick = () => {
+        if (file.url) chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+      };
+    }
   }
 
   function showFileListView() {

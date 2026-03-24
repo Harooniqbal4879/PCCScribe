@@ -857,7 +857,12 @@
           e.stopPropagation();
           const idx = parseInt(btn.dataset.idx, 10);
           const file = files[idx];
-          if (file?.url) chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+          if (!file?.url) return;
+          // Primary: ask background to create the tab (reliable, no popup blocker)
+          chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+          // Fallback: window.open in case background sleeps (browsers rarely block
+          // window.open from a direct user-gesture handler)
+          window.open(file.url, "_blank", "noopener");
         });
       });
 
@@ -905,7 +910,9 @@
     const openPdfBtn = document.getElementById("pccscribe-file-open-pdf-btn");
     if (openPdfBtn) {
       openPdfBtn.onclick = () => {
-        if (file.url) chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+        if (!file.url) return;
+        chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+        window.open(file.url, "_blank", "noopener");
       };
     }
   }

@@ -1066,25 +1066,42 @@
 
   // ─── Create Form ─────────────────────────────────────────────────────────────
 
+  // Sanity-check a candidate patient name: reject anything with ALL_CAPS words,
+  // more than 4 words, or no capital letter (navigation/alert text often fails these).
+  function isValidPersonName(name) {
+    if (!name || typeof name !== "string") return false;
+    const words = name.trim().split(/\s+/);
+    if (words.length > 4) return false;
+    // Reject if any word is ALL_CAPS (like RESIDENT, ALERTS, etc.)
+    if (words.some(w => w.length > 2 && w === w.toUpperCase() && /[A-Z]/.test(w))) return false;
+    // Must look like a name (starts with capital, mostly letters)
+    return /^[A-Z][a-zA-Z'\-]+/.test(name);
+  }
+
   function showCreateForm() {
     const form = document.getElementById("pccscribe-create-form");
     const btn = document.getElementById("pccscribe-new-patient-btn");
     if (!form) return;
 
-    // Pre-fill from detected patient
-    const info = detectPatientInfo();
+    // Use cachedPatientInfo (set on page load from the main chart page DOM) rather than
+    // calling detectPatientInfo() fresh — doing so while on the Misc tab or a sub-page
+    // scrapes navigation/alert text and produces garbled names like
+    // "Carolyn ALL RESIDENT No Alerts Azlan Tariq Home Admin Reports Young".
+    const info = (cachedPatientInfo && cachedPatientInfo.name) ? cachedPatientInfo : detectPatientInfo();
 
-    const nameEl = document.getElementById("pccf-name");
-    const ageEl = document.getElementById("pccf-age");
-    const genderEl = document.getElementById("pccf-gender");
-    const dobEl = document.getElementById("pccf-dob");
-    const facilityEl = document.getElementById("pccf-facility");
-    const unitEl = document.getElementById("pccf-unit");
-    const mrnEl = document.getElementById("pccf-mrn");
-    const physEl = document.getElementById("pccf-physician");
-
-    if (nameEl && info.name) nameEl.value = info.name;
+    const nameEl     = document.getElementById("pccf-name");
     const nicknameEl = document.getElementById("pccf-nickname");
+    const ageEl      = document.getElementById("pccf-age");
+    const genderEl   = document.getElementById("pccf-gender");
+    const dobEl      = document.getElementById("pccf-dob");
+    const facilityEl = document.getElementById("pccf-facility");
+    const unitEl     = document.getElementById("pccf-unit");
+    const mrnEl      = document.getElementById("pccf-mrn");
+    const pccDbIdEl  = document.getElementById("pccf-pccdbid");
+    const physEl     = document.getElementById("pccf-physician");
+
+    // Only pre-fill name if it passes the sanity check
+    if (nameEl && info.name && isValidPersonName(info.name)) nameEl.value = info.name;
     if (nicknameEl && info.nickname) nicknameEl.value = info.nickname;
     if (ageEl && info.age) ageEl.value = String(info.age);
     if (genderEl && info.gender) genderEl.value = info.gender;
@@ -1092,7 +1109,6 @@
     if (facilityEl && info.facility) facilityEl.value = info.facility;
     if (unitEl && info.unit) unitEl.value = info.unit;
     if (mrnEl && info.mrn) mrnEl.value = info.mrn;
-    const pccDbIdEl = document.getElementById("pccf-pccdbid");
     if (pccDbIdEl && info.pccDbId) pccDbIdEl.value = info.pccDbId;
     if (physEl && info.physician) physEl.value = info.physician;
 
@@ -1203,7 +1219,12 @@
   // ─── Auto-sync patient data to PCCScribe API ──────────────────────────────────
   // Called automatically after each page scan. Silently upserts by pccDbId.
   async function syncPatientToApi() {
-    if (!cachedPatientInfo.pccDbId) return; // can only sync if we have a PCC internal ID
+    // Need at least one PCC identifier (internal DB ID from displayCareProfile, or URL client ID)
+    const pccInternalId = cachedPatientInfo.pccDbId || cachedPatientInfo.pccId;
+    if (!pccInternalId) return;
+
+    // Validate name before syncing — don't auto-create with garbage names
+    if (!cachedPatientInfo.name || !isValidPersonName(cachedPatientInfo.name)) return;
 
     const syncEl = document.getElementById("pccscribe-sync-status");
     if (syncEl) {
@@ -1212,11 +1233,11 @@
     }
 
     const payload = {
-      name: cachedPatientInfo.name || "Unknown",
+      name: cachedPatientInfo.name,
       age: cachedPatientInfo.age || 0,
       facilityName: cachedPatientInfo.facility || "",
       unit: cachedPatientInfo.unit || "",
-      pccInternalId: cachedPatientInfo.pccDbId,
+      pccInternalId,
       ...(cachedPatientInfo.mrn ? { mrn: cachedPatientInfo.mrn } : {}),
       ...(cachedPatientInfo.nickname ? { nickname: cachedPatientInfo.nickname } : {}),
       ...(cachedPatientInfo.dob ? { dateOfBirth: cachedPatientInfo.dob } : {}),
@@ -1234,8 +1255,8 @@
       ...(cachedPatientInfo.emergencyContact ? { emergencyContact: cachedPatientInfo.emergencyContact } : {}),
     };
 
-    // Don't sync if we don't have the minimum required fields
-    if (!payload.name || payload.name === "Unknown" || !payload.facilityName || !payload.unit) return;
+    // Don't sync if name is missing — facility/unit are desirable but not required
+    if (!payload.name) return;
 
     const result = await chrome.runtime.sendMessage({ type: "SYNC_PATIENT", payload });
 

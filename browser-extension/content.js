@@ -707,6 +707,18 @@
 
         <div id="pccscribe-status" class="pccscribe-status"></div>
 
+        <div class="pccscribe-divider"></div>
+
+        <!-- Clinical Data Sync -->
+        <div style="padding:0 2px;">
+          <div class="pccscribe-label" style="margin-bottom:6px;">Clinical Data (from PCC tabs)</div>
+          <button id="pccscribe-clinical-sync-btn" class="pccscribe-btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Sync Diagnoses · Allergies · Vitals · Orders
+          </button>
+          <div id="pccscribe-clinical-status" style="font-size:10px;color:#6b7280;margin-top:5px;min-height:13px;line-height:1.4;"></div>
+        </div>
+
         <!-- Settings -->
         <div class="pccscribe-settings-section">
           <button id="pccscribe-settings-toggle" class="pccscribe-settings-toggle" type="button">
@@ -939,6 +951,91 @@
     });
   }
 
+  // ─── Detect clinical tab URLs from PCC navigation bar ───────────────────────
+  // Scans the current page's <a> tags to find the actual URLs for each clinical
+  // tab (Med Diag, Allergy, etc.). PCC's nav links change per server instance so
+  // we discover them dynamically rather than hardcoding URL patterns.
+  function detectTabUrls() {
+    const allLinks = Array.from(document.querySelectorAll('a[href]'));
+    const map = {};
+    const hints = {
+      diagnoses:     ["cp_diagnosis", "cp_diagnos"],
+      allergies:     ["cp_allerg"],
+      vitals:        ["weightsandvital", "cp_vital", "cp_weight"],
+      orders:        ["cp_order", "physician_order"],
+      immunizations: ["cp_immun", "immunization"],
+    };
+
+    for (const link of allLinks) {
+      const href = link.getAttribute("href") || "";
+      const full = href.startsWith("http") ? href : (href.startsWith("/") ? location.origin + href : "");
+      if (!full) continue;
+      for (const [key, patterns] of Object.entries(hints)) {
+        if (!map[key] && patterns.some(p => full.toLowerCase().includes(p))) {
+          // Attach the current patient's clientId if the link doesn't already have it
+          try {
+            const u = new URL(full);
+            const cid = cachedPatientInfo?.pccId;
+            if (cid && !u.searchParams.get("ESOLclientid")) u.searchParams.set("ESOLclientid", cid);
+            map[key] = u.href;
+          } catch (_) {
+            map[key] = full;
+          }
+        }
+      }
+    }
+    return map;
+  }
+
+  // ─── Clinical Data Sync ───────────────────────────────────────────────────────
+  async function syncClinicalData() {
+    const btn      = document.getElementById("pccscribe-clinical-sync-btn");
+    const statusEl = document.getElementById("pccscribe-clinical-status");
+
+    // Need a mapped patient
+    const patientSelectEl = document.getElementById("pccscribe-patient-select");
+    const patientId = patientSelectEl?.value;
+    if (!patientId) {
+      if (statusEl) { statusEl.style.color = "#ef4444"; statusEl.textContent = "Map a patient first."; }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Syncing…"; }
+    if (statusEl) { statusEl.style.color = "#6b7280"; statusEl.textContent = "Opening PCC tabs in background…"; }
+
+    const tabUrls = detectTabUrls();
+    const origin  = location.origin;
+    const pccId   = cachedPatientInfo?.pccId || null;
+
+    const resp = await chrome.runtime.sendMessage({
+      type: "SCRAPE_CLINICAL_TABS",
+      patientId: parseInt(patientId, 10),
+      tabUrls,
+      origin,
+      pccId,
+    });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Sync Diagnoses · Allergies · Vitals · Orders
+      `;
+    }
+
+    if (statusEl) {
+      if (resp?.success) {
+        const scraped = (resp.scraped || []).join(", ");
+        const errs = resp.errors ? Object.entries(resp.errors).map(([k, v]) => `${k}: ${v}`).join("; ") : "";
+        statusEl.style.color = "#10b981";
+        statusEl.textContent = `✓ Synced: ${scraped || "none"}${errs ? `  ⚠ ${errs}` : ""}`;
+      } else {
+        statusEl.style.color = "#ef4444";
+        statusEl.textContent = "Sync failed: " + (resp?.error || "Unknown error");
+      }
+    }
+  }
+
   function bindPanelEvents() {
     document.getElementById("pccscribe-close-btn").addEventListener("click", closePanel);
     document.getElementById("pccscribe-sync-btn").addEventListener("click", syncNotes);
@@ -946,6 +1043,8 @@
 
     document.getElementById("pccscribe-tab-notes").addEventListener("click", () => switchTab("notes"));
     document.getElementById("pccscribe-tab-files").addEventListener("click", () => switchTab("files"));
+
+    document.getElementById("pccscribe-clinical-sync-btn").addEventListener("click", syncClinicalData);
 
     // ── File detail view — back button ─────────────────────────────────────
     document.getElementById("pccscribe-file-back-btn").addEventListener("click", () => {

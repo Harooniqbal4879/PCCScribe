@@ -91,6 +91,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleSaveFileContent(message).then(sendResponse);
     return true;
   }
+
+  if (message.type === "SCRAPE_CLINICAL_TABS") {
+    handleScrapeClinicalTabs(message).then(sendResponse);
+    return true;
+  }
 });
 
 async function handleCheckConnection() {
@@ -544,4 +549,275 @@ async function handleSendNotes({ patientId, notes }) {
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLINICAL TAB SCRAPER
+// ═══════════════════════════════════════════════════════════════════════════════
+// Each extractor is a SELF-CONTAINED function injected via executeScript — no
+// closures, no external references. Returns a { data, error } object.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Med Diag extractor ────────────────────────────────────────────────────────
+function extractMedDiagData() {
+  try {
+    const rows = Array.from(document.querySelectorAll("table tr")).filter(tr => {
+      const cells = tr.querySelectorAll("td");
+      return cells.length >= 2 && !tr.querySelector("th");
+    });
+    const diagnoses = [];
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim());
+      if (cells.length < 2) continue;
+      // Skip rows that look like headers or empty rows
+      if (!cells.some(c => c.length > 1)) continue;
+      // Detect ICD code — looks like "E11.9", "Z23", "I10", etc.
+      const icdCell = cells.find(c => /^[A-Z]\d{2}[\.\d\w]*$/i.test(c));
+      if (!icdCell) continue;
+      const icdIdx = cells.indexOf(icdCell);
+      const description = cells[icdIdx + 1] || cells.find((c, i) => i !== icdIdx && c.length > 4) || "";
+      // Look for date pattern MM/DD/YYYY
+      const dateVal = cells.find(c => /\d{1,2}\/\d{1,2}\/\d{4}/.test(c)) || "";
+      // Rank / type: often first column contains "1", "2", or "Primary", "Secondary"
+      const rankCell = cells[0];
+      diagnoses.push({ rank: rankCell, icd: icdCell, description, onsetDate: dateVal });
+    }
+    return { data: diagnoses, error: null };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+// ── Allergy extractor ─────────────────────────────────────────────────────────
+function extractAllergyData() {
+  try {
+    const rows = Array.from(document.querySelectorAll("table tr")).filter(tr => {
+      return tr.querySelectorAll("td").length >= 2 && !tr.querySelector("th");
+    });
+    const allergies = [];
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim());
+      if (cells.length < 2 || !cells.some(c => c.length > 1)) continue;
+      // Skip navigation/button rows
+      if (cells.every(c => /^(edit|del|save|cancel|\d{1,2})$/i.test(c))) continue;
+      const allergen   = cells[0] || "";
+      const type       = cells[1] || "";
+      const reaction   = cells[2] || "";
+      const severity   = cells[3] || "";
+      const onsetDate  = cells.find(c => /\d{1,2}\/\d{1,2}\/\d{4}/.test(c)) || "";
+      if (!allergen || allergen.length < 2) continue;
+      allergies.push({ allergen, type, reaction, severity, onsetDate });
+    }
+    return { data: allergies, error: null };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+// ── Vitals extractor ──────────────────────────────────────────────────────────
+function extractVitalsData() {
+  try {
+    // PCC vitals pages have a header row followed by data rows — capture headers first
+    const tables = Array.from(document.querySelectorAll("table"));
+    let best = null, bestScore = 0;
+    for (const tbl of tables) {
+      const headers = Array.from(tbl.querySelectorAll("th")).map(th => th.textContent.trim().toLowerCase());
+      const score = headers.filter(h => /bp|temp|pulse|weight|o2|pain|resp/.test(h)).length;
+      if (score > bestScore) { best = tbl; bestScore = score; }
+    }
+    if (!best) return { data: [], error: "No vitals table found" };
+
+    const headerEls = Array.from(best.querySelectorAll("th")).map(th => th.textContent.trim());
+    const dataRows = Array.from(best.querySelectorAll("tr")).filter(tr => !tr.querySelector("th") && tr.querySelectorAll("td").length > 1);
+
+    const readings = dataRows.slice(0, 30).map(row => {
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim());
+      const obj = {};
+      headerEls.forEach((h, i) => { if (h && cells[i] !== undefined) obj[h] = cells[i]; });
+      return obj;
+    }).filter(r => Object.values(r).some(v => v && v.length > 0));
+
+    return { data: readings, error: null };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+// ── Orders extractor ──────────────────────────────────────────────────────────
+function extractOrdersData() {
+  try {
+    const tables = Array.from(document.querySelectorAll("table"));
+    // Find the table most likely to be the orders table
+    let best = null, bestScore = 0;
+    for (const tbl of tables) {
+      const text = tbl.textContent.toLowerCase();
+      const score = (text.includes("order") ? 2 : 0) +
+                    (text.includes("freq") ? 1 : 0) +
+                    (text.includes("start") ? 1 : 0) +
+                    (text.includes("physician") || text.includes("prescriber") ? 1 : 0);
+      if (score > bestScore) { best = tbl; bestScore = score; }
+    }
+    if (!best || bestScore < 2) return { data: [], error: "No orders table found" };
+
+    const headerEls = Array.from(best.querySelectorAll("th")).map(th => th.textContent.trim());
+    const dataRows  = Array.from(best.querySelectorAll("tr")).filter(tr => !tr.querySelector("th") && tr.querySelectorAll("td").length >= 2);
+
+    const orders = dataRows.slice(0, 50).map(row => {
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim());
+      if (headerEls.length > 0) {
+        const obj = {};
+        headerEls.forEach((h, i) => { if (h && cells[i] !== undefined) obj[h] = cells[i]; });
+        return obj;
+      }
+      // Fallback: no headers — just return indexed cells
+      return { order: cells[0], frequency: cells[1], startDate: cells[2], physician: cells[3] };
+    }).filter(r => r && Object.values(r).some(v => v && v.length > 2));
+
+    return { data: orders, error: null };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+// ── Immunization extractor ────────────────────────────────────────────────────
+function extractImmunizationData() {
+  try {
+    const rows = Array.from(document.querySelectorAll("table tr")).filter(tr =>
+      tr.querySelectorAll("td").length >= 2 && !tr.querySelector("th")
+    );
+    const immunizations = [];
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.textContent.trim());
+      if (cells.length < 2 || !cells.some(c => c.length > 2)) continue;
+      if (cells.every(c => /^(edit|del|\d{1,2})$/i.test(c))) continue;
+      const vaccine   = cells[0] || "";
+      const dateGiven = cells.find(c => /\d{1,2}\/\d{1,2}\/\d{4}/.test(c)) || "";
+      const lotNo     = cells[2] || "";
+      const site      = cells[3] || "";
+      if (!vaccine || vaccine.length < 3) continue;
+      immunizations.push({ vaccine, dateGiven, lotNo, site });
+    }
+    return { data: immunizations, error: null };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+// ── Generic helper: open a hidden tab, wait for load, run extractor, close ───
+async function openHiddenTabAndScrape(url, extractorFn) {
+  return new Promise((resolve) => {
+    chrome.tabs.create({ url, active: false }, (tab) => {
+      const tabId = tab.id;
+      const TIMEOUT_MS = 25000;
+      let done = false;
+
+      const timer = setTimeout(() => {
+        if (!done) { done = true; chrome.tabs.remove(tabId, () => {}); resolve({ data: null, error: "Timeout loading " + url }); }
+      }, TIMEOUT_MS);
+
+      function onUpdated(updatedTabId, changeInfo) {
+        if (updatedTabId !== tabId || changeInfo.status !== "complete" || done) return;
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        // Small delay for JS-rendered content
+        setTimeout(() => {
+          if (done) return;
+          chrome.scripting.executeScript(
+            { target: { tabId }, func: extractorFn, world: "ISOLATED" },
+            (results) => {
+              done = true;
+              clearTimeout(timer);
+              chrome.tabs.remove(tabId, () => {});
+              const result = results?.[0]?.result;
+              if (chrome.runtime.lastError || !result) {
+                resolve({ data: null, error: chrome.runtime.lastError?.message || "No result" });
+              } else {
+                resolve(result);
+              }
+            }
+          );
+        }, 1500);
+      }
+
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
+  });
+}
+
+// ── Tab definitions: name, URL slug pattern, extractor function ───────────────
+const CLINICAL_TABS = [
+  {
+    key:      "diagnoses",
+    label:    "Med Diag",
+    urlHints: ["cp_diagnosis", "cp_diagnos"],
+    extractor: extractMedDiagData,
+  },
+  {
+    key:      "allergies",
+    label:    "Allergy",
+    urlHints: ["cp_allerg"],
+    extractor: extractAllergyData,
+  },
+  {
+    key:      "vitals",
+    label:    "Wts/Vitals",
+    urlHints: ["weightsandvital", "cp_weight", "cp_vital"],
+    extractor: extractVitalsData,
+  },
+  {
+    key:      "orders",
+    label:    "Orders",
+    urlHints: ["cp_order", "physician_order", "cp_physician"],
+    extractor: extractOrdersData,
+  },
+  {
+    key:      "immunizations",
+    label:    "Immun",
+    urlHints: ["cp_immun", "immunization"],
+    extractor: extractImmunizationData,
+  },
+];
+
+// ── Main orchestrator ─────────────────────────────────────────────────────────
+// message: { patientId, tabUrls: { diagnoses: '...', allergies: '...', ... }, origin }
+async function handleScrapeClinicalTabs({ patientId, tabUrls, origin, pccId }) {
+  const { apiUrl } = await getConfig();
+  const results = {};
+  const errors  = {};
+
+  for (const tab of CLINICAL_TABS) {
+    // Prefer explicitly supplied URL, fall back to constructing from known patterns
+    let url = tabUrls?.[tab.key] || "";
+
+    // Build fallback URL from pattern if not supplied
+    if (!url && origin && pccId) {
+      if (tab.key === "diagnoses")     url = `${origin}/clinical/admin/client/cp_diagnosis.jsp?ESOLclientid=${pccId}`;
+      if (tab.key === "allergies")     url = `${origin}/admin/client/cp_allergies.jsp?ESOLclientid=${pccId}`;
+      if (tab.key === "vitals")        url = `${origin}/admin/client/cp_weightsandvitals.jsp?ESOLclientid=${pccId}`;
+      if (tab.key === "orders")        url = `${origin}/clinical/admin/client/cp_physician_orders.jsp?ESOLclientid=${pccId}`;
+      if (tab.key === "immunizations") url = `${origin}/admin/client/cp_immunizations.jsp?ESOLclientid=${pccId}`;
+    }
+
+    if (!url) { errors[tab.key] = "No URL"; continue; }
+
+    console.log(`[PCCScribe] Scraping ${tab.label}: ${url}`);
+    const { data, error } = await openHiddenTabAndScrape(url, tab.extractor);
+
+    if (error) { errors[tab.key] = error; continue; }
+    results[tab.key] = data;
+
+    // Persist to PCCScribe DB
+    if (patientId && data) {
+      try {
+        await fetch(`${apiUrl}/patients/${patientId}/clinical-data`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataType: tab.key, data }),
+        });
+      } catch (e) {
+        console.warn(`[PCCScribe] Failed to save ${tab.key}:`, e.message);
+      }
+    }
+  }
+
+  return { success: true, scraped: Object.keys(results), errors };
 }

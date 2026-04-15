@@ -1,0 +1,16 @@
+packages:
+  "date-fns": "For formatting clinical dates nicely"
+  "framer-motion": "For smooth page transitions and beautiful animated interactions"
+  "@hookform/resolvers": "Zod validation for forms"
+  "zod": "Schema definition for form validation"
+  "clsx": "Class name merging"
+  "tailwind-merge": "Class name merging"
+
+images:
+  - path: "artifacts/pccscribe/public/images/clinical-bg.png"
+    description: "Subtle, abstract medical background in light blues and crisp white. Clean, minimal, professional. Shallow depth of field, hinting at a modern hospital environment."
+    aspect_ratio: "16:9"
+
+notes:
+  - "Importing API hooks directly from @workspace/api-client-react as per workspace structure."
+  - "Using wouter for routing."

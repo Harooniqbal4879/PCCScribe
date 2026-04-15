@@ -1,0 +1,1821 @@
+// PCCScribe Content Script — runs on PointClickCare pages
+
+(function () {
+  if (window.__pccscribeInjected) return;
+  window.__pccscribeInjected = true;
+
+  // ─── PCC Patient Detection ───────────────────────────────────────────────────
+  // Targets the actual PCC DOM as seen on cp_careclientprofile.jsp and similar pages.
+
+  // ─── Helper: extract text of a residentDetailsSummary cell by its label ──────
+  function extractDetailByLabel(label) {
+    const cells = document.querySelectorAll("td.residentDetailsLabel");
+    for (const cell of cells) {
+      if (cell.innerText.includes(label)) {
+        const sibling = cell.nextElementSibling;
+        return sibling ? sibling.innerText.replace(/\s+/g, " ").trim() : null;
+      }
+    }
+    return null;
+  }
+
+  // ─── Helper: extract current vitals from td.vital cells ──────────────────────
+  function extractVitals() {
+    const vitals = {};
+    const vitalCells = document.querySelectorAll("td.vital");
+    for (const cell of vitalCells) {
+      const detailsDiv = cell.querySelector(".vitalDetails");
+      if (!detailsDiv) continue;
+      const boldEl = detailsDiv.querySelector("b");
+      if (!boldEl) continue;
+
+      // Label may be "BP:" (value outside) or "Temp:97.6" (value inside bold)
+      const boldText = boldEl.innerText.replace(/\s+/g, "").trim();
+      // Get all text from vitalDetails, strip out the date divs to get value+unit
+      const dateDivs = Array.from(detailsDiv.querySelectorAll("div div, div"));
+      // Find timestamp: a div whose text looks like a date
+      let timestamp = null;
+      for (const d of dateDivs) {
+        if (/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}/.test(d.innerText)) {
+          timestamp = d.innerText.trim();
+          break;
+        }
+      }
+
+      // Full text of the details div (minus timestamp)
+      const fullText = detailsDiv.innerText.replace(timestamp || "", "").replace(/\s+/g, " ").trim();
+
+      // Extract label and value
+      // Pattern A: "BP: 119/76 mmHg" — label ends with colon, value follows
+      // Pattern B: "Temp:97.6 °F"    — value embedded in label
+      let label, value;
+      const colonSplit = boldText.match(/^([A-Za-z]+):(.+)$/);
+      if (colonSplit && colonSplit[2].length > 0) {
+        // Pattern B: label and value are in the bold text
+        label = colonSplit[1];
+        value = colonSplit[2] + " " + fullText.replace(boldText, "").trim();
+      } else {
+        // Pattern A: label is bold text (ends with colon), value is outside
+        label = boldText.replace(":", "");
+        value = fullText.replace(boldText, "").trim();
+      }
+
+      const unit = value.match(/[a-zA-Z°%\/]+/)?.[0] || "";
+      const numStr = value.split(/[^0-9./]/)[0];
+      const keyMap = {
+        BP: "bp", Temp: "temp", Pulse: "pulse", Weight: "weight",
+        Resp: "resp", BS: "bs", O2: "o2", Pain: "pain",
+      };
+      const key = keyMap[label] || label.toLowerCase();
+      vitals[key] = { value: numStr, unit: unit.trim(), timestamp };
+    }
+    return Object.keys(vitals).length > 0 ? vitals : null;
+  }
+
+  // ─── Helper: extract first emergency contact ──────────────────────────────────
+  function extractEmergencyContact() {
+    const rows = document.querySelectorAll("tr");
+    for (const row of rows) {
+      const cells = row.querySelectorAll("td");
+      if (cells.length < 5) continue;
+      const contactTypeCell = cells[cells.length - 1];
+      if (!contactTypeCell.innerText.includes("Emergency Contact # 1")) continue;
+      const nameCell = cells[1];
+      const phoneCell = cells[2];
+      const relationCell = cells[cells.length - 2];
+      const name = nameCell.innerText.replace(/\(\d+\)/, "").trim();
+      const phone = phoneCell.innerText.replace(/\s+/g, " ").trim();
+      const relation = relationCell.innerText.trim();
+      return `${name} (${relation}): ${phone}`;
+    }
+    return null;
+  }
+
+  function detectPatientInfo() {
+    const info = {
+      name: null,       // "Patricia Abramczyk" (First Last)
+      firstName: null,
+      lastName: null,
+      nickname: null,   // "Val" — commonly known as
+      mrn: null,        // "PCC-9906"
+      pccId: null,      // chart/record number (e.g. 9906)
+      pccDbId: null,    // internal DB ID from displayCareProfile (e.g. 9490049)
+      dob: null,        // "1949-11-15"
+      age: null,        // 76
+      gender: null,     // "Female"
+      unit: null,       // "2 - Bristol 218-B"
+      facility: null,   // "Applewood Nursing Center"
+      physician: null,  // "Salman Khan"
+      status: null,     // "Current"
+      // Clinical summary fields
+      allergies: null,          // "Amoxicillin, levoFLOXacin, ..."
+      codeStatus: null,         // "FULL CODE"
+      specialInstructions: null,// alert notes text
+      diet: null,               // dietary notes
+      initialAdmissionDate: null,// MDS initial admission date
+      enterpriseId: null,       // PCC enterprise/org ID
+      currentVitals: null,      // { bp, temp, pulse, weight, resp, bs, o2, pain } with timestamps
+      emergencyContact: null,   // "Matt Beavers (Son): Mobile: (734) 621-2028"
+    };
+
+    // ── 1. PCC client ID from URL ─────────────────────────────────────────────
+    const urlParams = new URLSearchParams(window.location.search);
+    info.pccId = urlParams.get("ESOLclientid") || urlParams.get("clientId") || urlParams.get("id") || null;
+    if (info.pccId) info.mrn = "PCC-" + info.pccId;
+
+    // ── 2. PRIMARY: displayCareProfile onclick attribute ──────────────────────
+    // PCC renders:  onclick="displayCareProfile(9490049,'Beavers, Valerie (9906)')"
+    // #careProfileResidentBtn is the Care Profile button on the patient header.
+    // This is the most reliable source: name + chart ID + internal DB ID, all in one attribute.
+    const careProfileBtn = document.querySelector(
+      '#careProfileResidentBtn, input[onclick*="displayCareProfile"], button[onclick*="displayCareProfile"]'
+    );
+    if (careProfileBtn) {
+      const onclick = careProfileBtn.getAttribute("onclick") || "";
+      // Match: displayCareProfile(dbId,'Last, First (chartId)')
+      const cpMatch = onclick.match(/displayCareProfile\(\s*(\d+)\s*,\s*['"]([^'"]+)['"]\s*\)/);
+      if (cpMatch) {
+        info.pccDbId = cpMatch[1];          // internal DB record ID (e.g. 9490049)
+        const nameStr = cpMatch[2];         // e.g. "Beavers, Valerie (9906)"
+
+        // Parse "Last, First (chartId)"
+        const nm = nameStr.match(/^([^,]+),\s+([^("]+?)\s*(?:\((\d+)\))?$/);
+        if (nm) {
+          info.lastName  = nm[1].trim();
+          info.firstName = nm[2].trim();
+          info.name      = `${info.firstName} ${info.lastName}`;
+          if (nm[3]) {
+            info.pccId = nm[3];             // chart number (e.g. 9906)
+            info.mrn   = "PCC-" + nm[3];
+          }
+        }
+      }
+    }
+
+    // ── 3. Rendered page text — avoids <script> tag content bleed-in ──────────
+    const bodyText = document.body.innerText;
+
+    // ── 4. Fallback name detection from rendered text ─────────────────────────
+    if (!info.name) {
+      const namePattern = /\b([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*\((\d{4,9})\)/;
+      const nameMatch = bodyText.match(namePattern);
+      if (nameMatch) {
+        info.lastName  = nameMatch[1].trim();
+        info.firstName = nameMatch[2].trim();
+        info.name      = `${info.firstName} ${info.lastName}`;
+        if (!info.pccId) { info.pccId = nameMatch[3]; info.mrn = "PCC-" + nameMatch[3]; }
+      } else {
+        // Last fallback: page title "Last, First - PointClickCare"
+        const titleMatch = document.title.match(/^([A-Z][A-Za-z'\-]+),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)/);
+        if (titleMatch) {
+          info.lastName  = titleMatch[1].trim();
+          info.firstName = titleMatch[2].trim();
+          info.name      = `${info.firstName} ${info.lastName}`;
+        }
+      }
+    }
+
+    // ── 5. Nickname / "commonly known as" ────────────────────────────────────
+    // PCC sometimes shows: Beavers, Valerie (9906) "Val"
+    // Look for a quoted word near the patient name area.
+    const nicknamePattern = /\b(?:[A-Z][A-Za-z'\-]+),\s+[A-Z][A-Za-z'\-]+[^""\n]*["""]([A-Za-z'\-]+)["""]/;
+    const nnMatch = bodyText.match(nicknamePattern);
+    if (nnMatch) info.nickname = nnMatch[1].trim();
+
+    // Also check onclick attribute directly for a nickname suffix
+    if (!info.nickname && careProfileBtn) {
+      const onclick = careProfileBtn.getAttribute("onclick") || "";
+      const nnOnclick = onclick.match(/\)\s*[""]([A-Za-z'\-]+)[""]/);
+      if (nnOnclick) info.nickname = nnOnclick[1].trim();
+    }
+
+    // ── 4. Unit / Room / Bed — direct ID ──────────────────────────────────────
+    // <span id="res_unitRoomBed">2 - Bristol 230-A</span>
+    const unitEl = document.getElementById("res_unitRoomBed");
+    if (unitEl) info.unit = unitEl.innerText.trim();
+
+    // ── 5. Status — direct ID ─────────────────────────────────────────────────
+    // <span id="res_status">Current</span>
+    const statusEl = document.getElementById("res_status");
+    if (statusEl) info.status = statusEl.innerText.trim();
+
+    // ── 6. Gender, DOB, Age, Physician from .residentProfileDetails ───────────
+    // PCC wraps all of these in <td class="residentProfileDetails">
+    // Each field is in its own <p> tag inside that cell.
+    const profileCell = document.querySelector(".residentProfileDetails");
+    if (profileCell) {
+      const paragraphs = Array.from(profileCell.querySelectorAll("p"));
+      for (const p of paragraphs) {
+        const txt = p.innerText.replace(/\s+/g, " ").trim();
+
+        // Gender / DOB / Age paragraph: "Gender: Female   DOB: 9/20/1950   Age: 75"
+        if (/Gender/i.test(txt)) {
+          const gm = txt.match(/Gender[:\s]*(Male|Female|Non-binary|Other)/i);
+          if (gm && !info.gender) info.gender = gm[1];
+
+          const dm = txt.match(/DOB[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+          if (dm && !info.dob) info.dob = parseMDY(dm[1]);
+
+          const am = txt.match(/Age[:\s]*(\d{1,3})/i);
+          if (am && !info.age) info.age = parseInt(am[1]);
+        }
+
+        // Physician paragraph: "Physician: Ramy Alosachie"
+        if (/^Physician[:\s]/i.test(txt) && !info.physician) {
+          info.physician = txt.replace(/^Physician[:\s]*/i, "").trim();
+        }
+      }
+    }
+
+    // Fallback for DOB/Age/Gender/Physician if profileCell wasn't found
+    if (!info.dob) {
+      const m = bodyText.match(/DOB[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+      if (m) info.dob = parseMDY(m[1]);
+    }
+    if (!info.age) {
+      const m = bodyText.match(/\bAge[:\s]+(\d{1,3})\b/i);
+      if (m) info.age = parseInt(m[1]);
+    }
+    if (!info.gender) {
+      const m = bodyText.match(/\bGender[:\s]+(Male|Female|Non-binary|Other)\b/i);
+      if (m) info.gender = m[1];
+    }
+    if (!info.physician) {
+      const m = bodyText.match(/\bPhysician[:\s]+([A-Z][A-Za-z\s\.\-']+?)(?:\r?\n|DOB|Gender|Status|Location|Edit)/m);
+      if (m) info.physician = m[1].trim().replace(/\s{2,}/g, " ");
+    }
+    if (!info.unit) {
+      const m = bodyText.match(/\bLocation[:\s]+([^\r\n]{3,60})/i);
+      if (m) {
+        const loc = m[1].trim();
+        if (!/(select|choose|facility)/i.test(loc)) info.unit = loc;
+      }
+    }
+
+    // ── 7. Facility name — read from PCC's facilityProperties script tag ────────
+    // PCC embeds: var facilityProperties = {"properties":{"facility_name":"Applewood Nursing Center",...},...}
+    // Content scripts can read <script> tag textContent from the DOM even though they
+    // cannot access the page's JS execution context (window.facilityProperties).
+    for (const script of document.querySelectorAll("script")) {
+      const src = script.textContent || "";
+      if (src.includes("facilityProperties") && src.includes("facility_name")) {
+        const m = src.match(/["']facility_name["']\s*:\s*["']([^"']+)["']/);
+        if (m && m[1].trim().length > 2) {
+          info.facility = m[1].trim();
+          break;
+        }
+      }
+    }
+
+    // Fallback: PCC footer first meaningful line
+    if (!info.facility) {
+      for (const sel of ["#footer", ".footer", "[class*='footer']", "footer"]) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const lines = el.innerText.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+        for (const line of lines) {
+          if (
+            /(nursing|center|care|health|manor|home|medical|rehab|residence)/i.test(line) &&
+            !/facility selection|select a facility/i.test(line) &&
+            line.length < 80
+          ) {
+            info.facility = line;
+            break;
+          }
+        }
+        if (info.facility) break;
+      }
+    }
+
+    // ── 8. Clinical summary fields ────────────────────────────────────────────
+    // Allergies — td.allergyRed / allergyYellow / allergyNone, or by label
+    const allergyEl = document.querySelector("td.allergyRed, td.allergyYellow, td.allergyNone, td.allergyGreen");
+    if (allergyEl) {
+      const t = allergyEl.innerText.replace(/\s+/g, " ").trim();
+      if (t && !/^no known/i.test(t)) info.allergies = t;
+    }
+    if (!info.allergies) {
+      const a = extractDetailByLabel("Allergies:");
+      if (a && !/^no known/i.test(a)) info.allergies = a;
+    }
+
+    // Code status — find residentDetailsSummary containing code status keywords
+    const summaryEls = document.querySelectorAll("td.residentDetailsSummary");
+    for (const el of summaryEls) {
+      const t = el.innerText.replace(/\s+/g, " ").trim();
+      if (/\b(FULL CODE|DNR|DNI|COMFORT|HOSPICE|DO NOT RESUSCITATE|Code Status)/i.test(t)) {
+        // Strip the "Advance Directives" link text and extra whitespace
+        info.codeStatus = t.replace(/\(Advance Directives\)/gi, "").replace(/\s{2,}/g, " ").trim();
+        break;
+      }
+    }
+
+    // Special instructions — residentDetailsSummary following the "Special Instructions:" label
+    // When it has content, the residentInfoEmpty class is NOT present on the sibling
+    const si = extractDetailByLabel("Special Instructions:");
+    if (si && si.length > 1) info.specialInstructions = si;
+
+    // Diet
+    const dietEl = document.querySelector("td.dietDescriptions");
+    if (dietEl) {
+      const t = dietEl.innerText.replace(/\s+/g, " ").trim();
+      if (t) info.diet = t;
+    }
+    if (!info.diet) {
+      const d = extractDetailByLabel("Diet:");
+      if (d) info.diet = d;
+    }
+
+    // Admission date (re-entry)
+    const admDate = extractDetailByLabel("Admission (Re-entry):");
+    if (admDate) info.admissionDate = admDate;
+
+    // Initial admission date (MDS)
+    const initDate = extractDetailByLabel("Initial Admission Date (MDS):");
+    if (initDate) info.initialAdmissionDate = initDate;
+
+    // Enterprise ID
+    const eid = extractDetailByLabel("Enterprise ID:");
+    if (eid) info.enterpriseId = eid.replace(/\s/g, "");
+
+    // Current vitals
+    info.currentVitals = extractVitals();
+
+    // Emergency contact (first Emergency Contact #1)
+    info.emergencyContact = extractEmergencyContact();
+
+    return info;
+  }
+
+  function parseNameIntoInfo(raw, info) {
+    // Non-anchored match: works even if raw contains extra text
+    const m = raw.match(/([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)*),\s+([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s*(?:\((\d+)\))?/);
+    if (m) {
+      info.lastName  = m[1].trim();
+      info.firstName = m[2].trim();
+      info.name      = `${info.firstName} ${info.lastName}`;
+      if (m[3] && !info.pccId) { info.pccId = m[3]; info.mrn = "PCC-" + m[3]; }
+    } else {
+      info.name = raw.replace(/\s*\(\d+\)/, "").split("\n")[0].trim();
+    }
+  }
+
+  function parseMDY(str) {
+    const m = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (!m) return null;
+    const year = m[3].length === 2 ? "20" + m[3] : m[3];
+    return `${year}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  }
+
+  // ─── Note Type Detection ────────────────────────────────────────────────────
+
+  function detectNoteType() {
+    const path = window.location.pathname.toLowerCase();
+    const search = window.location.search.toLowerCase();
+    const combined = path + search;
+
+    if (combined.includes("progressnote") || combined.includes("prog_note") || combined.includes("prognote")) return "progress_notes";
+    if (combined.includes("order") || combined.includes("physician") || combined.includes("rx")) return "physician_orders";
+    if (combined.includes("mds") || combined.includes("assessment")) return "mds_assessment";
+    if (combined.includes("careplan") || combined.includes("care_plan") || combined.includes("care-plan")) return "care_plan";
+    if (combined.includes("emar") || combined.includes("/mar") || combined.includes("medication")) return "mar";
+    if (combined.includes("nursing")) return "nursing_notes";
+    if (combined.includes("therapy") || combined.includes("/pt/") || combined.includes("/ot/") || combined.includes("/st/")) return "therapy_notes";
+    if (combined.includes("diet") || combined.includes("nutrition")) return "dietary_notes";
+    if (combined.includes("social") || combined.includes("casework")) return "social_work_notes";
+    return "other";
+  }
+
+  // ─── Note Content Extraction ────────────────────────────────────────────────
+
+  // ── Map PCC note type labels to our normalized enum values ──────────────────
+  function mapPccNoteType(label) {
+    if (!label) return null;
+    const t = label.toLowerCase();
+    if (t.includes("emar") || t.includes("medication administration")) return "mar";
+    if (t.includes("progress") || t.includes("narrative") || t.includes("health status") ||
+        t.includes("respiratory") || t.includes("nurse practitioner") || t.includes("physician assistant")) return "progress_notes";
+    if (t.includes("physician order") || t.includes("physician's order")) return "physician_orders";
+    if (t.includes("therapy") || t.includes("rehab") || t.includes("pt ") || t.includes("ot ") || t.includes("st ")) return "therapy_notes";
+    if (t.includes("dietary") || t.includes("nutrition")) return "dietary_notes";
+    if (t.includes("social work") || t.includes("social service")) return "social_work_notes";
+    if (t.includes("nursing")) return "nursing_notes";
+    if (t.includes("mds") || t.includes("minimum data set")) return "mds_assessment";
+    if (t.includes("care plan")) return "care_plan";
+    return null;
+  }
+
+  // ── Extract the print URL from an anchor element ─────────────────────────────
+  // PCC uses many onclick patterns — try them all before giving up.
+  function getPrintUrl(anchor) {
+    if (!anchor) return null;
+
+    function toAbsolute(u) {
+      if (!u) return null;
+      u = u.trim();
+      if (u.startsWith("http")) return u;
+      if (u.startsWith("/")) return window.location.origin + u;
+      return null;
+    }
+
+    const href = anchor.getAttribute("href") || "";
+    // 1) Direct href (not javascript: and not a bare anchor)
+    if (href && !href.startsWith("javascript") && href !== "#" &&
+        !href.endsWith("#") && href !== window.location.href && href.length > 1) {
+      return toAbsolute(href);
+    }
+
+    const onclick = (anchor.getAttribute("onclick") || "") +
+                    (href.startsWith("javascript") ? " " + href : "");
+
+    if (!onclick.trim()) return null;
+
+    // 2) window.open('url', ...) or openWindow('url', ...)
+    const winOpen = onclick.match(/(?:window\.open|openWindow)\s*\(\s*['"]([^'"]+)['"]/i);
+    if (winOpen) return toAbsolute(winOpen[1]);
+
+    // 3) Named print/view functions with a URL as first string arg:
+    //    printNote('/url'), printView(), viewPrint(), openNoteForPrint(), popNote(), etc.
+    const namedFn = onclick.match(
+      /(?:printNote|printView|viewPrint|openNote|openForPrint|popNote|popupNote|openNoteForPrint|printNoteView)\s*\(\s*['"]([^'"]+)['"]/i
+    );
+    if (namedFn) return toAbsolute(namedFn[1]);
+
+    // 4) Any quoted string in onclick that looks like a PCC URL path
+    //    e.g. PointClickCare.something.print(event, '/PointClickCare/Clinical/...')
+    const allQuoted = [...onclick.matchAll(/['"]([^'"]{8,})['"]/g)].map(m => m[1]);
+    for (const q of allQuoted) {
+      if ((q.includes("/PointClickCare/") || q.includes("/pcc/") ||
+           q.includes("print") || q.includes("Print") ||
+           q.includes("note") || q.includes("Note")) &&
+          !q.includes(" ") && (q.startsWith("/") || q.startsWith("http"))) {
+        const abs = toAbsolute(q);
+        if (abs) return abs;
+      }
+    }
+
+    // 5) __doPostBack(target, arg) — ASP.NET style; can't navigate directly, skip
+    // 6) Fallback: look for the "view" sibling link in the same <td> and swap
+    //    "viewNote" for "printNote" in the URL (common PCC pattern)
+    const td = anchor.closest("td");
+    if (td) {
+      const viewAnchor = Array.from(td.querySelectorAll("a")).find(
+        (a) => a !== anchor && a.textContent.trim().toLowerCase() === "view"
+      );
+      if (viewAnchor) {
+        const viewHref = viewAnchor.getAttribute("href") || "";
+        if (viewHref && !viewHref.startsWith("javascript") && viewHref.length > 4) {
+          const printHref = viewHref
+            .replace("viewNote", "printNote")
+            .replace("viewForm", "printForm")
+            .replace("/view/", "/print/")
+            .replace("action=view", "action=print");
+          if (printHref !== viewHref) return toAbsolute(printHref);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ── Parse the PCC Progress Notes / Practitioner Notes table ─────────────────
+  // Columns (observed from PCC DOM):
+  //   [0] view | print links
+  //   [1] Effective Date (MM/DD/YYYY HH:MM)
+  //   [2] Type (note type label)
+  //   [3] Note (truncated content)
+  //   [4] Care Plan Item or Task
+  //   [5] Dept.
+  //   [6] Shift Report (Y/N)
+  //   [7] 24 Hour Report (Y/N)
+  function extractNoteRows() {
+    const notes = [];
+    const today = new Date().toISOString().slice(0, 10);
+    const pageNoteType = detectNoteType();
+
+    const allTrs = Array.from(document.querySelectorAll("tr"));
+    const MAX_NOTES = 25; // safety cap
+
+    for (const tr of allTrs) {
+      if (notes.length >= MAX_NOTES) break;
+
+      const anchors = Array.from(tr.querySelectorAll("a"));
+      const printAnchor = anchors.find(
+        (a) => a.textContent.trim().toLowerCase() === "print"
+      );
+      if (!printAnchor) continue;
+
+      const printUrl = getPrintUrl(printAnchor);
+      const cells = Array.from(tr.querySelectorAll("td"));
+      if (cells.length < 3) continue;
+
+      // Cell 0: the view/print links column — skip it for text
+      // Cell 1: date/time
+      // Cell 2: note type label
+      // Cell 3: truncated content
+      // Cell 5 (approx): dept / author
+      let noteDate = today;
+      let noteTypePcc = "";
+      let truncatedContent = "";
+      let author = "";
+
+      cells.forEach((cell, i) => {
+        const text = cell.textContent.trim();
+        if (i === 0) return; // view/print links
+
+        // Date pattern: MM/DD/YYYY HH:MM
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}/.test(text)) {
+          const datePart = text.split(/\s+/)[0];
+          const parsed = parseMDY(datePart);
+          if (parsed) noteDate = parsed;
+          return;
+        }
+
+        // Note type: medium-length, no numerics at start, not the truncated note
+        if (!noteTypePcc && text.length > 5 && text.length < 90 &&
+            !/^\d/.test(text) && !text.includes("SERVICE DATE") &&
+            !["Y", "N", "view", "print"].includes(text)) {
+          noteTypePcc = text;
+          return;
+        }
+
+        // Content (longer text) — skip if it looks like a dept code
+        if (!truncatedContent && text.length > 20 &&
+            text !== noteTypePcc && !/^[A-Z]{1,10}$/.test(text)) {
+          truncatedContent = text;
+          return;
+        }
+
+        // Dept: short string towards the end of the row, not Y/N
+        if (!author && i >= 4 && text.length > 1 && text.length < 20 &&
+            !["Y", "N"].includes(text) && !/^\d/.test(text)) {
+          author = text;
+        }
+      });
+
+      const mappedType = mapPccNoteType(noteTypePcc) || pageNoteType;
+
+      notes.push({
+        noteType: mappedType,
+        noteTypePcc: noteTypePcc || null,
+        noteDate,
+        author: author || null,
+        content: truncatedContent || noteTypePcc || "Note content pending full extraction",
+        printUrl: printUrl || null,
+        sourceUrl: window.location.href,
+      });
+    }
+
+    // Fallback: no print links found — grab any note-like content areas
+    if (notes.length === 0) {
+      const contentSelectors = [
+        ".note-content", ".note-text", ".clinical-note", "[class*='noteContent']",
+        "[class*='note-body']", ".documentation-text", "article", ".content-area",
+      ];
+      for (const sel of contentSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+          const text = el.innerText.trim();
+          if (text.length > 50) {
+            notes.push({
+              noteType: pageNoteType,
+              noteTypePcc: null,
+              noteDate: today,
+              author: null,
+              content: text,
+              printUrl: null,
+              sourceUrl: window.location.href,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    return notes;
+  }
+
+  // ─── UI ──────────────────────────────────────────────────────────────────────
+
+  const FAB_ID = "pccscribe-fab";
+  const PANEL_ID = "pccscribe-panel";
+
+  function createFAB() {
+    if (document.getElementById(FAB_ID)) return;
+    const fab = document.createElement("button");
+    fab.id = FAB_ID;
+    fab.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.17 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.11 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 5.96 5.96l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg><span>PCCScribe</span>`;
+    fab.title = "Open PCCScribe Sync Panel";
+    fab.addEventListener("click", togglePanel);
+    document.body.appendChild(fab);
+  }
+
+  function panelHTML() {
+    return `
+      <div class="pccscribe-panel-header">
+        <div class="pccscribe-panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.17 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.11 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 5.96 5.96l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg>
+          PCCScribe
+        </div>
+        <button class="pccscribe-close" id="pccscribe-close-btn">✕</button>
+      </div>
+
+      <!-- Always-visible patient bar -->
+      <div class="pccscribe-patient-bar">
+        <div id="pccscribe-detected-patient" class="pccscribe-patient-name pccscribe-undetected">Scanning...</div>
+        <div id="pccscribe-sync-status" style="font-size:11px;margin-top:3px;color:#6b7280;min-height:13px;"></div>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="pccscribe-tabs">
+        <button class="pccscribe-tab-btn active" id="pccscribe-tab-notes">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Notes
+        </button>
+        <button class="pccscribe-tab-btn" id="pccscribe-tab-files">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Files
+          <span class="pccscribe-tab-badge" id="pccscribe-files-badge" style="display:none;"></span>
+        </button>
+      </div>
+
+      <!-- Notes pane -->
+      <div class="pccscribe-pane" id="pccscribe-pane-notes">
+
+        <!-- Map / Select -->
+        <div id="pccscribe-map-section">
+          <div class="pccscribe-label">Map to PCCScribe Patient</div>
+          <select id="pccscribe-patient-select" class="pccscribe-select">
+            <option value="">Loading patients...</option>
+          </select>
+
+          <!-- Create New Patient inline form (hidden by default) -->
+          <div id="pccscribe-create-form" style="display:none; margin-top:10px;">
+            <div class="pccscribe-form-title">New Patient Details</div>
+            <input id="pccf-name" class="pccscribe-input" placeholder="Full name *" type="text" />
+            <input id="pccf-nickname" class="pccscribe-input" placeholder='Known as (e.g. "Val")' type="text" />
+            <div class="pccscribe-row">
+              <input id="pccf-age" class="pccscribe-input" placeholder="Age *" type="number" min="0" max="130" style="width:70px;flex-shrink:0;" />
+              <input id="pccf-gender" class="pccscribe-input" placeholder="Gender" type="text" style="flex:1;" />
+            </div>
+            <input id="pccf-dob" class="pccscribe-input" placeholder="Date of birth (YYYY-MM-DD)" type="text" />
+            <input id="pccf-facility" class="pccscribe-input" placeholder="Facility name *" type="text" />
+            <input id="pccf-unit" class="pccscribe-input" placeholder="Unit / Room *" type="text" />
+            <input id="pccf-mrn" class="pccscribe-input" placeholder="MRN / PCC Chart ID" type="text" />
+            <input id="pccf-pccdbid" class="pccscribe-input" placeholder="PCC Internal ID (auto)" type="text" style="color:#9ca3af;" />
+            <input id="pccf-physician" class="pccscribe-input" placeholder="Attending physician" type="text" />
+            <div class="pccscribe-form-btns">
+              <button id="pccscribe-create-submit" class="pccscribe-btn-primary" style="flex:1;">Create Patient</button>
+              <button id="pccscribe-create-cancel" class="pccscribe-btn-ghost">Cancel</button>
+            </div>
+          </div>
+
+          <button id="pccscribe-new-patient-btn" class="pccscribe-btn-secondary">+ Create New Patient</button>
+        </div>
+
+        <div class="pccscribe-divider"></div>
+
+        <!-- Note Type -->
+        <div>
+          <div class="pccscribe-label">Note Type</div>
+          <select id="pccscribe-note-type" class="pccscribe-select">
+            <option value="progress_notes">Progress Notes</option>
+            <option value="physician_orders">Physician Orders</option>
+            <option value="mds_assessment">MDS Assessment</option>
+            <option value="care_plan">Care Plan</option>
+            <option value="mar">MAR</option>
+            <option value="nursing_notes">Nursing Notes</option>
+            <option value="therapy_notes">Therapy Notes</option>
+            <option value="dietary_notes">Dietary Notes</option>
+            <option value="social_work_notes">Social Work Notes</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div class="pccscribe-divider"></div>
+
+        <!-- Notes Preview -->
+        <div class="pccscribe-preview-box">
+          <div class="pccscribe-label">Notes Preview</div>
+          <div id="pccscribe-notes-count" class="pccscribe-notes-count">Scanning page...</div>
+          <div id="pccscribe-notes-list" class="pccscribe-notes-list"></div>
+        </div>
+
+        <button id="pccscribe-sync-btn" class="pccscribe-btn-primary" disabled>
+          Fetch &amp; Sync Notes
+        </button>
+
+        <div id="pccscribe-status" class="pccscribe-status"></div>
+
+        <div class="pccscribe-divider"></div>
+
+        <!-- Clinical Data Sync -->
+        <div style="padding:0 2px;">
+          <div class="pccscribe-label" style="margin-bottom:6px;">Clinical Data (from PCC tabs)</div>
+          <button id="pccscribe-clinical-sync-btn" class="pccscribe-btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Sync Diagnoses · Allergies · Vitals · Orders
+          </button>
+          <div id="pccscribe-clinical-status" style="font-size:10px;color:#6b7280;margin-top:5px;min-height:13px;line-height:1.4;"></div>
+        </div>
+
+        <!-- Settings -->
+        <div class="pccscribe-settings-section">
+          <button id="pccscribe-settings-toggle" class="pccscribe-settings-toggle" type="button">
+            ⚙ Settings
+          </button>
+          <div id="pccscribe-settings-body" class="pccscribe-settings-body" style="display:none;">
+            <label class="pccscribe-label" style="margin-bottom:4px;">API Server URL</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input
+                id="pccscribe-api-url-input"
+                class="pccscribe-input"
+                type="url"
+                placeholder="https://pcc.etherhealth.ai/api"
+                style="flex:1;font-size:11px;"
+              />
+              <button id="pccscribe-save-url-btn" class="pccscribe-btn-primary" style="padding:6px 10px;font-size:11px;white-space:nowrap;">
+                Save
+              </button>
+            </div>
+            <div id="pccscribe-settings-status" style="font-size:10px;margin-top:4px;color:#6b7280;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Files pane (hidden until Files tab selected) -->
+      <div class="pccscribe-pane pccscribe-pane-hidden" id="pccscribe-pane-files">
+
+        <!-- ── List view (default) ───────────────────────────────────── -->
+        <div id="pccscribe-files-list-view">
+          <div class="pccscribe-files-header">
+            <span class="pccscribe-label" style="margin:0;">Documents on this page</span>
+            <button class="pccscribe-files-refresh-btn" id="pccscribe-files-refresh">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="pccscribe-files-scan-status" class="pccscribe-files-scan-status"></div>
+          <div class="pccscribe-files-empty" id="pccscribe-files-empty">
+            <div class="pccscribe-files-empty-icon">📂</div>
+            <p>Navigate to the patient's <strong>Misc tab</strong> in PointClickCare, then click <strong>Refresh</strong> above.</p>
+          </div>
+          <div id="pccscribe-files-list"></div>
+        </div>
+
+        <!-- ── File detail view (shown after clicking a document) ──── -->
+        <div id="pccscribe-file-detail" style="display:none; flex-direction:column; height:100%; overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:6px; padding:8px 10px 6px; border-bottom:1px solid #1e293b; flex-shrink:0;">
+            <button id="pccscribe-file-back-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;padding:2px 4px;display:flex;align-items:center;gap:4px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              Files
+            </button>
+            <span id="pccscribe-file-detail-name" style="font-size:11px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></span>
+          </div>
+          <div id="pccscribe-file-detail-meta" style="font-size:10px;color:#6b7280;padding:4px 10px;flex-shrink:0;"></div>
+          <div style="padding:4px 8px 6px;flex-shrink:0;">
+            <button id="pccscribe-file-open-pdf-btn" style="width:100%;padding:7px;background:#0f172a;color:#94a3b8;border:1px solid #334155;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Open PDF in new tab
+            </button>
+          </div>
+          <div id="pccscribe-file-extract-status" style="font-size:10px;color:#94a3b8;padding:2px 10px 4px;flex-shrink:0;"></div>
+          <textarea id="pccscribe-file-text" readonly placeholder="Open the PDF, then paste or extract text here…" style="flex:1;min-height:120px;resize:none;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:4px;margin:0 8px;padding:8px;font-size:11px;line-height:1.5;font-family:inherit;overflow-y:auto;"></textarea>
+          <div style="padding:8px 10px;display:flex;gap:6px;flex-direction:column;flex-shrink:0;">
+            <button id="pccscribe-file-save-btn" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+              💾 Save to PCCScribe
+            </button>
+            <div id="pccscribe-file-save-status" style="font-size:10px;text-align:center;color:#6b7280;min-height:14px;"></div>
+          </div>
+        </div>
+
+      </div>
+    `;
+  }
+
+  function createPanel() {
+    if (document.getElementById(PANEL_ID)) return;
+    const panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    panel.innerHTML = panelHTML();
+    document.body.appendChild(panel);
+    bindPanelEvents();
+  }
+
+  function switchTab(tabName) {
+    const notesBtn  = document.getElementById("pccscribe-tab-notes");
+    const filesBtn  = document.getElementById("pccscribe-tab-files");
+    const notesPane = document.getElementById("pccscribe-pane-notes");
+    const filesPane = document.getElementById("pccscribe-pane-files");
+    if (!notesBtn || !filesBtn || !notesPane || !filesPane) return;
+
+    if (tabName === "files") {
+      notesBtn.classList.remove("active");
+      filesBtn.classList.add("active");
+      notesPane.classList.add("pccscribe-pane-hidden");
+      filesPane.classList.remove("pccscribe-pane-hidden");
+
+      // Show whatever is already cached immediately
+      loadFilesPane();
+
+      // Trigger scan in this frame AND in all sub-frames (PCC loads Misc tab etc. in iframes).
+      // The storage-change listener in bindPanelEvents() will auto-refresh the pane when done.
+      scanUploadedFiles();
+      chrome.storage.session.set({ triggerFileScan: Date.now() });
+    } else {
+      filesBtn.classList.remove("active");
+      notesBtn.classList.add("active");
+      filesPane.classList.add("pccscribe-pane-hidden");
+      notesPane.classList.remove("pccscribe-pane-hidden");
+    }
+  }
+
+  function loadFilesPane() {
+    chrome.storage.session.get(["pdfFileList"], (result) => {
+      const files = result.pdfFileList || [];
+      const emptyEl = document.getElementById("pccscribe-files-empty");
+      const listEl  = document.getElementById("pccscribe-files-list");
+      if (!emptyEl || !listEl) return;
+
+      if (files.length === 0) {
+        emptyEl.style.display = "block";
+        listEl.innerHTML = "";
+        return;
+      }
+
+      emptyEl.style.display = "none";
+      listEl.innerHTML = files.map((f, i) => {
+        const name = f.displayName || f.storedName || "Document";
+        const date = f.effectiveDate ? f.effectiveDate : "";
+        const cat  = f.category || "";
+        const meta = [date, cat].filter(Boolean).join(" · ");
+        return `
+          <div class="pccscribe-file-item" data-idx="${i}">
+            <div class="pccscribe-file-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
+            <div class="pccscribe-file-info">
+              <div class="pccscribe-file-name" title="${name}">${name}</div>
+              ${meta ? `<div class="pccscribe-file-meta">${meta}</div>` : ""}
+            </div>
+            <button class="pccscribe-file-open-btn" data-idx="${i}">Open</button>
+          </div>
+        `;
+      }).join("");
+
+      // "Open" button → open the PCC PDF viewer in a new tab (same as clicking Open in PCC)
+      listEl.querySelectorAll(".pccscribe-file-open-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.idx, 10);
+          const file = files[idx];
+          if (!file?.url) return;
+          // Primary: ask background to create the tab (reliable, no popup blocker)
+          chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+          // Fallback: window.open in case background sleeps (browsers rarely block
+          // window.open from a direct user-gesture handler)
+          window.open(file.url, "_blank", "noopener");
+        });
+      });
+
+      // Clicking the row body → show the file detail view
+      listEl.querySelectorAll(".pccscribe-file-item").forEach((item) => {
+        item.addEventListener("click", (e) => {
+          if (e.target.closest(".pccscribe-file-open-btn")) return;
+          const idx = parseInt(item.dataset.idx, 10);
+          openFileDetail(files[idx]);
+        });
+      });
+    });
+  }
+
+  // ─── File detail view ────────────────────────────────────────────────────────
+
+  let _currentOpenFile = null;
+
+  function openFileDetail(file) {
+    if (!file) return;
+    _currentOpenFile = file;
+
+    // Switch list → detail
+    const listView   = document.getElementById("pccscribe-files-list-view");
+    const detailView = document.getElementById("pccscribe-file-detail");
+    if (listView)   listView.style.display   = "none";
+    if (detailView) detailView.style.display = "flex";
+
+    // Populate header
+    const nameEl = document.getElementById("pccscribe-file-detail-name");
+    const metaEl = document.getElementById("pccscribe-file-detail-meta");
+    const statusEl = document.getElementById("pccscribe-file-extract-status");
+    const textEl  = document.getElementById("pccscribe-file-text");
+    const saveBtn = document.getElementById("pccscribe-file-save-btn");
+    const saveStatus = document.getElementById("pccscribe-file-save-status");
+
+    if (nameEl) nameEl.textContent = file.displayName || file.storedName || "Document";
+    if (metaEl) metaEl.textContent = [file.effectiveDate, file.category].filter(Boolean).join(" · ");
+    if (statusEl) { statusEl.textContent = ""; }
+    if (textEl)  { textEl.value = ""; textEl.placeholder = "Open the PDF, then paste or extract text here…"; }
+    if (saveBtn) saveBtn.disabled = false;
+    if (saveStatus) saveStatus.textContent = "";
+
+    // Wire "Open PDF in new tab" button with the correct URL for this file
+    const openPdfBtn = document.getElementById("pccscribe-file-open-pdf-btn");
+    if (openPdfBtn) {
+      openPdfBtn.onclick = () => {
+        if (!file.url) return;
+        chrome.runtime.sendMessage({ type: "OPEN_FILE_TAB", url: file.url });
+        window.open(file.url, "_blank", "noopener");
+      };
+    }
+  }
+
+  function showFileListView() {
+    _currentOpenFile = null;
+    const listView   = document.getElementById("pccscribe-files-list-view");
+    const detailView = document.getElementById("pccscribe-file-detail");
+    if (listView)   listView.style.display   = "";
+    if (detailView) detailView.style.display = "none";
+  }
+
+  function updateFilesBadge() {
+    chrome.storage.session.get(["pdfFileList"], (result) => {
+      const files = result.pdfFileList || [];
+      const badge = document.getElementById("pccscribe-files-badge");
+      if (!badge) return;
+      if (files.length > 0) {
+        badge.textContent = files.length;
+        badge.style.display = "inline-flex";
+      } else {
+        badge.style.display = "none";
+      }
+    });
+  }
+
+  // ─── Detect clinical tab URLs from PCC navigation bar ───────────────────────
+  // Scans the current page's <a> tags to find the actual URLs for each clinical
+  // tab (Med Diag, Allergy, etc.). PCC's nav links change per server instance so
+  // we discover them dynamically rather than hardcoding URL patterns.
+  function detectTabUrls() {
+    const allLinks = Array.from(document.querySelectorAll('a[href]'));
+    const map = {};
+    const hints = {
+      diagnoses:     ["cp_diagnosis", "cp_diagnos"],
+      allergies:     ["cp_allerg"],
+      vitals:        ["weightsandvital", "cp_vital", "cp_weight"],
+      orders:        ["cp_order", "physician_order"],
+      immunizations: ["cp_immun", "immunization"],
+    };
+
+    for (const link of allLinks) {
+      const href = link.getAttribute("href") || "";
+      const full = href.startsWith("http") ? href : (href.startsWith("/") ? location.origin + href : "");
+      if (!full) continue;
+      for (const [key, patterns] of Object.entries(hints)) {
+        if (!map[key] && patterns.some(p => full.toLowerCase().includes(p))) {
+          // Attach the current patient's clientId if the link doesn't already have it
+          try {
+            const u = new URL(full);
+            const cid = cachedPatientInfo?.pccId;
+            if (cid && !u.searchParams.get("ESOLclientid")) u.searchParams.set("ESOLclientid", cid);
+            map[key] = u.href;
+          } catch (_) {
+            map[key] = full;
+          }
+        }
+      }
+    }
+    return map;
+  }
+
+  // ─── Clinical Data Sync ───────────────────────────────────────────────────────
+  async function syncClinicalData() {
+    const btn      = document.getElementById("pccscribe-clinical-sync-btn");
+    const statusEl = document.getElementById("pccscribe-clinical-status");
+
+    // Need a mapped patient
+    const patientSelectEl = document.getElementById("pccscribe-patient-select");
+    const patientId = patientSelectEl?.value;
+    if (!patientId) {
+      if (statusEl) { statusEl.style.color = "#ef4444"; statusEl.textContent = "Map a patient first."; }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Syncing…"; }
+    if (statusEl) { statusEl.style.color = "#6b7280"; statusEl.textContent = "Opening PCC tabs in background…"; }
+
+    const tabUrls = detectTabUrls();
+    const origin  = location.origin;
+    const pccId   = cachedPatientInfo?.pccId || null;
+
+    const resp = await chrome.runtime.sendMessage({
+      type: "SCRAPE_CLINICAL_TABS",
+      patientId: parseInt(patientId, 10),
+      tabUrls,
+      origin,
+      pccId,
+    });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Sync Diagnoses · Allergies · Vitals · Orders
+      `;
+    }
+
+    if (statusEl) {
+      if (resp?.success) {
+        const scraped = (resp.scraped || []).join(", ");
+        const errs = resp.errors ? Object.entries(resp.errors).map(([k, v]) => `${k}: ${v}`).join("; ") : "";
+        statusEl.style.color = "#10b981";
+        statusEl.textContent = `✓ Synced: ${scraped || "none"}${errs ? `  ⚠ ${errs}` : ""}`;
+      } else {
+        statusEl.style.color = "#ef4444";
+        statusEl.textContent = "Sync failed: " + (resp?.error || "Unknown error");
+      }
+    }
+  }
+
+  function bindPanelEvents() {
+    document.getElementById("pccscribe-close-btn").addEventListener("click", closePanel);
+    document.getElementById("pccscribe-sync-btn").addEventListener("click", syncNotes);
+    document.getElementById("pccscribe-patient-select").addEventListener("change", onPatientSelected);
+
+    document.getElementById("pccscribe-tab-notes").addEventListener("click", () => switchTab("notes"));
+    document.getElementById("pccscribe-tab-files").addEventListener("click", () => switchTab("files"));
+
+    document.getElementById("pccscribe-clinical-sync-btn").addEventListener("click", syncClinicalData);
+
+    // ── File detail view — back button ─────────────────────────────────────
+    document.getElementById("pccscribe-file-back-btn").addEventListener("click", () => {
+      showFileListView();
+    });
+
+    // ── File detail view — Save to PCCScribe ──────────────────────────────
+    document.getElementById("pccscribe-file-save-btn").addEventListener("click", () => {
+      if (!_currentOpenFile) return;
+      const textEl     = document.getElementById("pccscribe-file-text");
+      const saveStatus = document.getElementById("pccscribe-file-save-status");
+      const saveBtn    = document.getElementById("pccscribe-file-save-btn");
+      const extractedContent = textEl?.value || "";
+      if (saveStatus) { saveStatus.style.color = "#94a3b8"; saveStatus.textContent = "Saving…"; }
+      if (saveBtn)  saveBtn.disabled = true;
+      chrome.runtime.sendMessage({
+        type: "SAVE_FILE_CONTENT",
+        pccClientId: _currentOpenFile.clientId,
+        pccFileId:   _currentOpenFile.fileId,
+        extractedContent,
+      }, (resp) => {
+        if (saveStatus) {
+          if (resp?.success) {
+            saveStatus.style.color = "#10b981";
+            saveStatus.textContent = "✓ Saved to PCCScribe";
+          } else {
+            saveStatus.style.color = "#ef4444";
+            saveStatus.textContent = "Save failed: " + (resp?.error || "unknown error");
+            if (saveBtn) saveBtn.disabled = false;
+          }
+        }
+      });
+    });
+
+    document.getElementById("pccscribe-files-refresh").addEventListener("click", () => {
+      const statusEl = document.getElementById("pccscribe-files-scan-status");
+      if (statusEl) { statusEl.style.color = ""; statusEl.textContent = "Scanning all page frames…"; }
+      // Ask background to scan every frame using executeScript — more reliable than
+      // cross-frame storage events, works even without sub-frame content script injection.
+      chrome.runtime.sendMessage({ type: "SCAN_FOR_FILES" }, (resp) => {
+        const files = resp?.files || [];
+        const diag  = resp?.diag  || "";
+        if (statusEl) {
+          if (files.length > 0) {
+            statusEl.style.color = "#10b981";
+            statusEl.textContent = `✓ Found ${files.length} document${files.length !== 1 ? "s" : ""}`;
+          } else {
+            statusEl.style.color = "#ef4444";
+            statusEl.textContent = `Nothing found (${diag})`;
+          }
+          setTimeout(() => { if (statusEl) { statusEl.textContent = ""; statusEl.style.color = ""; } }, 6000);
+        }
+        loadFilesPane();
+      });
+    });
+
+    updateFilesBadge();
+
+    chrome.storage.session.onChanged.addListener((changes) => {
+      if (changes.pdfFileList) {
+        updateFilesBadge();
+        const filesPane = document.getElementById("pccscribe-pane-files");
+        if (filesPane && !filesPane.classList.contains("pccscribe-pane-hidden")) {
+          loadFilesPane();
+        }
+      }
+
+      // Side panel finished extracting text — update the file detail view
+      if (changes.pdfExtractedText && _currentOpenFile) {
+        const text      = changes.pdfExtractedText.newValue || "";
+        const textEl    = document.getElementById("pccscribe-file-text");
+        const statusEl  = document.getElementById("pccscribe-file-extract-status");
+        const saveBtn   = document.getElementById("pccscribe-file-save-btn");
+        if (textEl) {
+          textEl.value = text || "";
+          textEl.placeholder = text ? "" : "No text layer found — this may be a scanned document";
+        }
+        if (statusEl) {
+          if (text.length > 0) {
+            statusEl.style.color = "#10b981";
+            statusEl.textContent = `✓ ${text.length.toLocaleString()} characters extracted`;
+          } else {
+            statusEl.style.color = "#f59e0b";
+            statusEl.textContent = "⚠ No text layer found (scanned image document)";
+          }
+        }
+        if (saveBtn) saveBtn.disabled = false;
+      }
+    });
+
+    document.getElementById("pccscribe-new-patient-btn").addEventListener("click", () => {
+      showCreateForm();
+    });
+    document.getElementById("pccscribe-create-cancel").addEventListener("click", () => {
+      hideCreateForm();
+    });
+    document.getElementById("pccscribe-create-submit").addEventListener("click", submitCreatePatient);
+
+    // ── Settings: toggle open/close ───────────────────────────────────────────
+    document.getElementById("pccscribe-settings-toggle").addEventListener("click", () => {
+      const body = document.getElementById("pccscribe-settings-body");
+      const isOpen = body.style.display !== "none";
+      body.style.display = isOpen ? "none" : "block";
+      if (!isOpen) {
+        // Populate current URL when opening
+        chrome.storage.sync.get(["apiUrl"], (result) => {
+          const urlInput = document.getElementById("pccscribe-api-url-input");
+          if (urlInput) urlInput.value = result.apiUrl || "https://pcc.etherhealth.ai/api";
+        });
+      }
+    });
+
+    // ── Settings: save URL ────────────────────────────────────────────────────
+    document.getElementById("pccscribe-save-url-btn").addEventListener("click", () => {
+      const input = document.getElementById("pccscribe-api-url-input");
+      const statusEl = document.getElementById("pccscribe-settings-status");
+      const url = (input?.value || "").trim().replace(/\/+$/, ""); // strip trailing slashes
+
+      if (!url.startsWith("http")) {
+        if (statusEl) { statusEl.textContent = "⚠ Must start with http:// or https://"; statusEl.style.color = "#ef4444"; }
+        return;
+      }
+
+      chrome.storage.sync.set({ apiUrl: url }, () => {
+        if (statusEl) {
+          statusEl.textContent = "✓ Saved — takes effect on next sync";
+          statusEl.style.color = "#10b981";
+          setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        }
+      });
+    });
+  }
+
+  // ─── Create Form ─────────────────────────────────────────────────────────────
+
+  // Sanity-check a candidate patient name: reject anything with ALL_CAPS words,
+  // more than 4 words, or no capital letter (navigation/alert text often fails these).
+  function isValidPersonName(name) {
+    if (!name || typeof name !== "string") return false;
+    const words = name.trim().split(/\s+/);
+    if (words.length > 4) return false;
+    // Reject if any word is ALL_CAPS (like RESIDENT, ALERTS, etc.)
+    if (words.some(w => w.length > 2 && w === w.toUpperCase() && /[A-Z]/.test(w))) return false;
+    // Must look like a name (starts with capital, mostly letters)
+    return /^[A-Z][a-zA-Z'\-]+/.test(name);
+  }
+
+  function showCreateForm() {
+    const form = document.getElementById("pccscribe-create-form");
+    const btn = document.getElementById("pccscribe-new-patient-btn");
+    if (!form) return;
+
+    // Use cachedPatientInfo (set on page load from the main chart page DOM) rather than
+    // calling detectPatientInfo() fresh — doing so while on the Misc tab or a sub-page
+    // scrapes navigation/alert text and produces garbled names like
+    // "Carolyn ALL RESIDENT No Alerts Azlan Tariq Home Admin Reports Young".
+    const info = (cachedPatientInfo && cachedPatientInfo.name) ? cachedPatientInfo : detectPatientInfo();
+
+    const nameEl     = document.getElementById("pccf-name");
+    const nicknameEl = document.getElementById("pccf-nickname");
+    const ageEl      = document.getElementById("pccf-age");
+    const genderEl   = document.getElementById("pccf-gender");
+    const dobEl      = document.getElementById("pccf-dob");
+    const facilityEl = document.getElementById("pccf-facility");
+    const unitEl     = document.getElementById("pccf-unit");
+    const mrnEl      = document.getElementById("pccf-mrn");
+    const pccDbIdEl  = document.getElementById("pccf-pccdbid");
+    const physEl     = document.getElementById("pccf-physician");
+
+    // Only pre-fill name if it passes the sanity check
+    if (nameEl && info.name && isValidPersonName(info.name)) nameEl.value = info.name;
+    if (nicknameEl && info.nickname) nicknameEl.value = info.nickname;
+    if (ageEl && info.age) ageEl.value = String(info.age);
+    if (genderEl && info.gender) genderEl.value = info.gender;
+    if (dobEl && info.dob) dobEl.value = info.dob;
+    if (facilityEl && info.facility) facilityEl.value = info.facility;
+    if (unitEl && info.unit) unitEl.value = info.unit;
+    if (mrnEl && info.mrn) mrnEl.value = info.mrn;
+    if (pccDbIdEl && info.pccDbId) pccDbIdEl.value = info.pccDbId;
+    if (physEl && info.physician) physEl.value = info.physician;
+
+    form.style.display = "block";
+    btn.style.display = "none";
+    if (nameEl) nameEl.focus();
+  }
+
+  function hideCreateForm() {
+    const form = document.getElementById("pccscribe-create-form");
+    const btn = document.getElementById("pccscribe-new-patient-btn");
+    if (form) form.style.display = "none";
+    if (btn) btn.style.display = "block";
+  }
+
+  async function submitCreatePatient() {
+    const name = (document.getElementById("pccf-name")?.value || "").trim();
+    const nickname = (document.getElementById("pccf-nickname")?.value || "").trim();
+    const ageStr = (document.getElementById("pccf-age")?.value || "").trim();
+    const gender = (document.getElementById("pccf-gender")?.value || "").trim();
+    const dob = (document.getElementById("pccf-dob")?.value || "").trim();
+    const facility = (document.getElementById("pccf-facility")?.value || "").trim();
+    const unit = (document.getElementById("pccf-unit")?.value || "").trim();
+    const mrn = (document.getElementById("pccf-mrn")?.value || "").trim();
+    const pccInternalId = (document.getElementById("pccf-pccdbid")?.value || "").trim();
+    const physician = (document.getElementById("pccf-physician")?.value || "").trim();
+    const age = parseInt(ageStr);
+
+    if (!name) { setStatus("Patient name is required.", "error"); return; }
+    if (!age || isNaN(age)) { setStatus("Age is required.", "error"); return; }
+    if (!facility) { setStatus("Facility name is required.", "error"); return; }
+    if (!unit) { setStatus("Unit / room is required.", "error"); return; }
+
+    const submitBtn = document.getElementById("pccscribe-create-submit");
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Creating..."; }
+    setStatus("Creating patient in PCCScribe...", "info");
+
+    const payload = {
+      name,
+      age,
+      facilityName: facility,
+      unit,
+      ...(mrn ? { mrn } : {}),
+      ...(dob ? { dateOfBirth: dob } : {}),
+      ...(gender ? { gender } : {}),
+      ...(physician ? { physician } : {}),
+      ...(nickname ? { nickname } : {}),
+      ...(pccInternalId ? { pccInternalId } : {}),
+      ...(cachedPatientInfo.status ? { admissionStatus: cachedPatientInfo.status } : {}),
+      // Clinical summary fields — auto-collected, no form input needed
+      ...(cachedPatientInfo.allergies ? { allergies: cachedPatientInfo.allergies } : {}),
+      ...(cachedPatientInfo.codeStatus ? { codeStatus: cachedPatientInfo.codeStatus } : {}),
+      ...(cachedPatientInfo.specialInstructions ? { specialInstructions: cachedPatientInfo.specialInstructions } : {}),
+      ...(cachedPatientInfo.diet ? { diet: cachedPatientInfo.diet } : {}),
+      ...(cachedPatientInfo.initialAdmissionDate ? { initialAdmissionDate: cachedPatientInfo.initialAdmissionDate } : {}),
+      ...(cachedPatientInfo.enterpriseId ? { enterpriseId: cachedPatientInfo.enterpriseId } : {}),
+      ...(cachedPatientInfo.currentVitals ? { currentVitals: JSON.stringify(cachedPatientInfo.currentVitals) } : {}),
+      ...(cachedPatientInfo.emergencyContact ? { emergencyContact: cachedPatientInfo.emergencyContact } : {}),
+    };
+
+    const result = await chrome.runtime.sendMessage({ type: "CREATE_PATIENT", payload });
+
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Create Patient"; }
+
+    if (result.success) {
+      setStatus(`✓ Patient "${name}" created!`, "success");
+      patients.push(result.patient);
+
+      const select = document.getElementById("pccscribe-patient-select");
+      if (select) {
+        const opt = document.createElement("option");
+        opt.value = String(result.patient.id);
+        opt.textContent = `${result.patient.name} (${result.patient.age} yrs · ${result.patient.mrn || "No MRN"})`;
+        select.appendChild(opt);
+        select.value = String(result.patient.id);
+        onPatientSelected();
+      }
+
+      setTimeout(hideCreateForm, 800);
+    } else {
+      setStatus("Failed: " + (result.error || "Unknown error"), "error");
+    }
+  }
+
+  // ─── Panel State ─────────────────────────────────────────────────────────────
+
+  let detectedNotes = [];
+  let patients = [];
+  let cachedPatientInfo = null;
+
+  function togglePanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) { createPanel(); openPanel(); return; }
+    panel.classList.toggle("pccscribe-panel-open");
+    if (panel.classList.contains("pccscribe-panel-open")) scanPage();
+  }
+
+  function openPanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) { panel.classList.add("pccscribe-panel-open"); scanPage(); }
+  }
+
+  function closePanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) panel.classList.remove("pccscribe-panel-open");
+  }
+
+  // ─── Auto-sync patient data to PCCScribe API ──────────────────────────────────
+  // Called automatically after each page scan. Silently upserts by pccDbId.
+  async function syncPatientToApi() {
+    // Need at least one PCC identifier (internal DB ID from displayCareProfile, or URL client ID)
+    const pccInternalId = cachedPatientInfo.pccDbId || cachedPatientInfo.pccId;
+    if (!pccInternalId) return;
+
+    // Validate name before syncing — don't auto-create with garbage names
+    if (!cachedPatientInfo.name || !isValidPersonName(cachedPatientInfo.name)) return;
+
+    const syncEl = document.getElementById("pccscribe-sync-status");
+    if (syncEl) {
+      syncEl.style.color = "#6b7280";
+      syncEl.textContent = "⏳ Syncing with PCCScribe...";
+    }
+
+    const payload = {
+      name: cachedPatientInfo.name,
+      age: cachedPatientInfo.age || 0,
+      facilityName: cachedPatientInfo.facility || "",
+      unit: cachedPatientInfo.unit || "",
+      pccInternalId,
+      ...(cachedPatientInfo.mrn ? { mrn: cachedPatientInfo.mrn } : {}),
+      ...(cachedPatientInfo.nickname ? { nickname: cachedPatientInfo.nickname } : {}),
+      ...(cachedPatientInfo.dob ? { dateOfBirth: cachedPatientInfo.dob } : {}),
+      ...(cachedPatientInfo.gender ? { gender: cachedPatientInfo.gender } : {}),
+      ...(cachedPatientInfo.status ? { admissionStatus: cachedPatientInfo.status } : {}),
+      ...(cachedPatientInfo.physician ? { physician: cachedPatientInfo.physician } : {}),
+      ...(cachedPatientInfo.allergies ? { allergies: cachedPatientInfo.allergies } : {}),
+      ...(cachedPatientInfo.codeStatus ? { codeStatus: cachedPatientInfo.codeStatus } : {}),
+      ...(cachedPatientInfo.specialInstructions ? { specialInstructions: cachedPatientInfo.specialInstructions } : {}),
+      ...(cachedPatientInfo.diet ? { diet: cachedPatientInfo.diet } : {}),
+      ...(cachedPatientInfo.admissionDate ? { admissionDate: cachedPatientInfo.admissionDate } : {}),
+      ...(cachedPatientInfo.initialAdmissionDate ? { initialAdmissionDate: cachedPatientInfo.initialAdmissionDate } : {}),
+      ...(cachedPatientInfo.enterpriseId ? { enterpriseId: cachedPatientInfo.enterpriseId } : {}),
+      ...(cachedPatientInfo.currentVitals ? { currentVitals: JSON.stringify(cachedPatientInfo.currentVitals) } : {}),
+      ...(cachedPatientInfo.emergencyContact ? { emergencyContact: cachedPatientInfo.emergencyContact } : {}),
+    };
+
+    // Don't sync if name is missing — facility/unit are desirable but not required
+    if (!payload.name) return;
+
+    const result = await chrome.runtime.sendMessage({ type: "SYNC_PATIENT", payload });
+
+    if (syncEl) {
+      if (result.success) {
+        const label = result.created ? "✓ Added to PCCScribe" : "✓ Patient data synced";
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        syncEl.style.color = result.created ? "#059669" : "#6b7280";
+        syncEl.textContent = `${label} · ${ts}`;
+
+        // If the patient was just created, refresh the patient list so they appear in the dropdown
+        if (result.created && result.patient) {
+          patients.push(result.patient);
+          const select = document.getElementById("pccscribe-patient-select");
+          if (select && select.querySelector(`option[value="${result.patient.id}"]`) === null) {
+            const opt = document.createElement("option");
+            opt.value = String(result.patient.id);
+            opt.textContent = `${result.patient.name} (${result.patient.age} yrs · ${result.patient.mrn || "No MRN"})`;
+            select.appendChild(opt);
+          }
+        }
+      } else {
+        syncEl.style.color = "#dc2626";
+        syncEl.textContent = `⚠ Sync failed: ${result.error || "unknown error"}`;
+      }
+    }
+  }
+
+  async function scanPage() {
+    // 1. Detect patient from PCC DOM
+    cachedPatientInfo = detectPatientInfo();
+    const patientEl = document.getElementById("pccscribe-detected-patient");
+    if (patientEl) {
+      if (cachedPatientInfo.name) {
+        const displayName = cachedPatientInfo.nickname
+          ? `${cachedPatientInfo.name} <span style="color:#6b7280;font-weight:400;font-size:12px;">"${cachedPatientInfo.nickname}"</span>`
+          : cachedPatientInfo.name;
+        const sub = [
+          cachedPatientInfo.age ? `Age ${cachedPatientInfo.age}` : null,
+          cachedPatientInfo.gender || null,
+          cachedPatientInfo.pccId ? `#${cachedPatientInfo.pccId}` : null,
+          cachedPatientInfo.unit || null,
+          cachedPatientInfo.facility || null,
+        ].filter(Boolean).join(" · ");
+        const subLine2 = [
+          cachedPatientInfo.status ? `Status: ${cachedPatientInfo.status}` : null,
+          cachedPatientInfo.physician ? `Dr. ${cachedPatientInfo.physician}` : null,
+        ].filter(Boolean).join(" · ");
+        patientEl.innerHTML = `<strong>${displayName}</strong>${sub ? `<br><span style="font-size:11px;color:#6b7280;font-weight:400;">${sub}</span>` : ""}${subLine2 ? `<br><span style="font-size:11px;color:#9ca3af;font-weight:400;">${subLine2}</span>` : ""}`;
+        patientEl.classList.remove("pccscribe-undetected");
+
+        // Auto-sync to API in the background (non-blocking)
+        syncPatientToApi();
+      } else {
+        patientEl.textContent = "Patient not detected — open a patient chart";
+        patientEl.classList.add("pccscribe-undetected");
+        const syncEl = document.getElementById("pccscribe-sync-status");
+        if (syncEl) syncEl.textContent = "";
+      }
+    }
+
+    // 2. Detect notes
+    detectedNotes = extractNoteRows();
+    const noteType = detectNoteType();
+    const noteTypeSelect = document.getElementById("pccscribe-note-type");
+    if (noteTypeSelect) noteTypeSelect.value = noteType;
+
+    const countEl = document.getElementById("pccscribe-notes-count");
+    const listEl = document.getElementById("pccscribe-notes-list");
+    if (countEl) {
+      countEl.textContent = detectedNotes.length > 0
+        ? `${detectedNotes.length} note(s) found on this page`
+        : "Page content will be captured as a note";
+    }
+    if (listEl && detectedNotes.length > 0) {
+      listEl.innerHTML = detectedNotes.slice(0, 4).map(n =>
+        `<div class="pccscribe-note-preview-item">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">
+            <span class="pccscribe-note-date">${n.noteDate}</span>
+            ${n.author ? `<span class="pccscribe-note-author">${n.author}</span>` : ""}
+            ${n.printUrl ? `<span style="font-size:10px;color:#059669;font-weight:600;">● Full</span>` : `<span style="font-size:10px;color:#f59e0b;font-weight:600;">● Truncated</span>`}
+          </div>
+          ${n.noteTypePcc ? `<div style="font-size:10px;color:#6366f1;margin-bottom:2px;font-weight:500;">${n.noteTypePcc}</div>` : ""}
+          <div class="pccscribe-note-snippet">${n.content.substring(0, 100)}…</div>
+         </div>`
+      ).join("") + (detectedNotes.length > 4 ? `<div class="pccscribe-more">+${detectedNotes.length - 4} more</div>` : "");
+    }
+
+    // 3. Load patients from PCCScribe
+    const result = await chrome.runtime.sendMessage({ type: "FETCH_PATIENTS" });
+    patients = result.success ? result.patients : [];
+    const select = document.getElementById("pccscribe-patient-select");
+    if (select) {
+      if (patients.length === 0) {
+        select.innerHTML = `<option value="">No patients yet</option>`;
+      } else {
+        select.innerHTML = `<option value="">— Select a patient —</option>` +
+          patients.map(p =>
+            `<option value="${p.id}">${p.name} (${p.age} yrs · ${p.mrn || "No MRN"})</option>`
+          ).join("");
+
+        // Auto-match by name
+        if (cachedPatientInfo.name) {
+          const n = cachedPatientInfo.name.toLowerCase();
+          const matched = patients.find(p => {
+            const pn = p.name.toLowerCase();
+            return pn.includes(n) || n.includes(pn) ||
+              (cachedPatientInfo.lastName && pn.includes(cachedPatientInfo.lastName.toLowerCase()));
+          });
+          if (matched) {
+            select.value = String(matched.id);
+            onPatientSelected();
+          }
+        }
+      }
+    }
+  }
+
+  function onPatientSelected() {
+    const select = document.getElementById("pccscribe-patient-select");
+    const syncBtn = document.getElementById("pccscribe-sync-btn");
+    if (syncBtn) syncBtn.disabled = !select?.value;
+  }
+
+  async function syncNotes() {
+    const select = document.getElementById("pccscribe-patient-select");
+    const noteTypeSelect = document.getElementById("pccscribe-note-type");
+    const syncBtn = document.getElementById("pccscribe-sync-btn");
+    if (!select?.value) return;
+
+    const patientId = parseInt(select.value);
+    const chosenNoteType = noteTypeSelect?.value || detectNoteType();
+
+    let notesToSend = detectedNotes.length > 0
+      ? detectedNotes.map(n => ({ ...n, noteType: chosenNoteType }))
+      : [{
+          noteType: chosenNoteType,
+          noteTypePcc: null,
+          noteDate: new Date().toISOString().slice(0, 10),
+          author: null,
+          content: document.body.innerText.trim().substring(0, 10000),
+          printUrl: null,
+          sourceUrl: window.location.href,
+        }];
+
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Fetching...";
+
+    // ── Step 1: Fetch full content from each print URL ────────────────────────
+    const notesWithPrintUrls = notesToSend.filter(n => n.printUrl);
+    const notesWithoutPrintUrls = notesToSend.filter(n => !n.printUrl);
+
+    // Notes without print URLs stay truncated
+    const enrichedNotes = [...notesWithoutPrintUrls.map(n => ({ ...n, contentQuality: "truncated" }))];
+
+    for (let i = 0; i < notesWithPrintUrls.length; i++) {
+      const note = notesWithPrintUrls[i];
+      setStatus(`Fetching note ${i + 1} of ${notesWithPrintUrls.length}...`, "info");
+      syncBtn.textContent = `Fetching ${i + 1}/${notesWithPrintUrls.length}...`;
+
+      const result = await chrome.runtime.sendMessage({
+        type: "FETCH_NOTE_CONTENT",
+        payload: { printUrl: note.printUrl },
+      });
+
+      if (result.success && result.content && result.content.length > 20) {
+        enrichedNotes.push({ ...note, content: result.content, contentQuality: "full" });
+      } else {
+        // Fall back to truncated content if print fetch fails
+        enrichedNotes.push({ ...note, contentQuality: "truncated" });
+      }
+    }
+
+    // ── Step 2: Send all enriched notes to the API ───────────────────────────
+    setStatus(`Saving ${enrichedNotes.length} note(s)...`, "info");
+    syncBtn.textContent = "Saving...";
+
+    const result = await chrome.runtime.sendMessage({
+      type: "SEND_NOTES",
+      payload: { patientId, notes: enrichedNotes },
+    });
+
+    syncBtn.disabled = false;
+    syncBtn.textContent = "Fetch & Sync Notes";
+
+    if (result.success) {
+      setStatus(`✓ ${result.inserted} note(s) synced with full content!`, "success");
+    } else {
+      setStatus("Error: " + (result.error || "Unknown error"), "error");
+    }
+  }
+
+  function setStatus(message, type) {
+    const el = document.getElementById("pccscribe-status");
+    if (!el) return;
+    el.textContent = message;
+    el.className = `pccscribe-status pccscribe-status-${type}`;
+  }
+
+  // ─── PDF Link Interceptor ─────────────────────────────────────────────────────
+
+  function initPdfInterceptor() {
+    document.addEventListener("click", (e) => {
+      const link = e.target.closest("a[href]");
+      if (!link) return;
+      const href = link.href || "";
+      if (!/\/(note|document|report)\b|\.pdf(\?|#|$)/i.test(href)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const select = document.getElementById("pccscribe-patient-select");
+      const patientId = select?.value ? parseInt(select.value) : null;
+
+      chrome.runtime.sendMessage({ type: "FETCH_PDF", url: href, patientId });
+      chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+      showPccToast("⏳ Fetching note...", "info");
+    }, true); // capture phase so we intercept before PCC handlers
+  }
+
+  // ─── Incoming message handler ─────────────────────────────────────────────────
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === "RENDER_PDF") renderPdfViewer(message.dataUri);
+    if (message.type === "SHOW_TOAST") showPccToast(message.message, "error");
+  });
+
+  // ─── PDF viewer (inline iframe pinned to right side of page) ─────────────────
+
+  function renderPdfViewer(dataUri) {
+    const existing = document.getElementById("pccscribe-pdf-viewer");
+    if (existing) existing.remove();
+
+    const container = document.createElement("div");
+    container.id = "pccscribe-pdf-viewer";
+    container.className = "pccscribe-pdf-container";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "pccscribe-pdf-close";
+    closeBtn.textContent = "✕ Close Note";
+    closeBtn.addEventListener("click", () => container.remove());
+
+    const iframe = document.createElement("iframe");
+    iframe.className = "pccscribe-pdf-iframe";
+    iframe.src = dataUri;
+
+    container.appendChild(closeBtn);
+    container.appendChild(iframe);
+    document.body.appendChild(container);
+  }
+
+  // ─── Toast notification injected into PCC page ────────────────────────────────
+
+  function showPccToast(msg, type = "error") {
+    const toast = document.createElement("div");
+    toast.className = `pccscribe-toast pccscribe-toast-${type}`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+
+  // ─── Uploaded Files scanner ───────────────────────────────────────────────────
+  // Scans any PCC page with openFile() anchors or viewfile.xhtml links (filesdisplay,
+  // Misc tab, etc.), extracts latest 10 PDFs, and stores them in session storage.
+
+  function scanUploadedFiles() {
+    // ── Three strategies to find PCC uploaded file links ─────────────────────
+    // S1: openFile() in href or onclick  (filesdisplay.xhtml pattern)
+    // S2: viewfile.xhtml direct URL in href
+    // S3: Any <a> in a <tr> whose text is a .pdf filename (Misc tab fallback)
+    //     → extract fileId from sibling edit/del links that carry ?fileId= params
+
+    const s1 = Array.from(document.querySelectorAll('a[href*="openFile"], a[onclick*="openFile"]'));
+    const s2 = Array.from(document.querySelectorAll('a[href*="viewfile"]'));
+    const s3 = Array.from(document.querySelectorAll("tr a")).filter(a =>
+      /\.pdf\b/i.test((a.textContent || "").trim())
+    );
+
+    // Merge deduped, prefer s1 → s2 → s3
+    const seen = new Set();
+    const allAnchors = [];
+    for (const a of [...s1, ...s2, ...s3]) {
+      if (!seen.has(a)) { seen.add(a); allAnchors.push(a); }
+    }
+
+    // Store diagnostic counts for the refresh button to show
+    const diagCounts = `S1:${s1.length} S2:${s2.length} S3:${s3.length}`;
+    chrome.storage.session.set({ pdfScanDiag: diagCounts });
+
+    if (allAnchors.length === 0) return;
+
+    const files = [];
+    const seenIds = new Set();
+
+    for (const a of allAnchors) {
+      const hrefRaw    = a.getAttribute("href")    || "";
+      const onclickRaw = a.getAttribute("onclick")  || "";
+      const raw        = hrefRaw + " " + onclickRaw;
+
+      let fileId = "", clientId = "", storedName = "", fileUrl = "";
+
+      // ── Pattern A: openFile('id','clientId','name.pdf') ─────────────────
+      const mA = raw.match(/openFile\(\s*'(\d+)',\s*'(\d+)',\s*'([^']+)'\s*\)/i);
+      if (mA) { [, fileId, clientId, storedName] = mA; }
+
+      // ── Pattern B: viewfile.xhtml?fileId=X&clientId=Y&fileMetadataName=Z ─
+      if (!fileId && hrefRaw.includes("viewfile")) {
+        try {
+          const pu = new URL(hrefRaw.startsWith("http") ? hrefRaw : location.origin + hrefRaw);
+          fileId     = pu.searchParams.get("fileId")           || "";
+          clientId   = pu.searchParams.get("clientId")         || "";
+          storedName = pu.searchParams.get("fileMetadataName") || "";
+          fileUrl    = pu.href;
+        } catch (_) {}
+      }
+
+      // ── Pattern C: PDF text link — get fileId from any sibling link in row ─
+      if (!fileId && /\.pdf\b/i.test((a.textContent || "").trim())) {
+        const row = a.closest("tr");
+        if (row) {
+          // Look for sibling links that carry ?fileId= or &fileId= in their href
+          const sibling = Array.from(row.querySelectorAll("a[href]")).find(sl =>
+            /[?&]fileId=/i.test(sl.getAttribute("href") || "") ||
+            /[?&]id=/i.test(sl.getAttribute("href") || "")
+          );
+          if (sibling) {
+            try {
+              const sh = sibling.getAttribute("href") || "";
+              const su = new URL(sh.startsWith("http") ? sh : location.origin + sh);
+              fileId   = su.searchParams.get("fileId") || su.searchParams.get("id") || "";
+              clientId = su.searchParams.get("clientId") || su.searchParams.get("ESOLclientid") || "";
+            } catch (_) {}
+          }
+          // Also check data attributes on the row or cells
+          if (!fileId) {
+            const elWithData = row.querySelector("[data-file-id],[data-fileid],[data-id]");
+            if (elWithData) {
+              fileId = elWithData.dataset.fileId || elWithData.dataset.fileid || elWithData.dataset.id || "";
+            }
+          }
+        }
+        storedName = storedName || (a.textContent || "").trim();
+      }
+
+      if (!fileId || seenIds.has(fileId)) continue;
+      seenIds.add(fileId);
+
+      const displayName = (a.textContent || "").trim() || storedName;
+
+      // Must be a PDF
+      if (!/\.pdf\b/i.test(displayName) && !/\.pdf\b/i.test(storedName)) continue;
+
+      // Parse table row for date and category
+      const row = a.closest("tr");
+      const cells = row ? Array.from(row.querySelectorAll("td")) : [];
+      const cellTexts = cells.map(td => td.textContent.trim());
+      const dateMatch = cellTexts.find(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) || "";
+
+      const linkTdIdx = cells.findIndex(td => td.contains(a));
+      let category = "";
+      for (let ci = linkTdIdx + 1; ci < cells.length; ci++) {
+        const text = cells[ci].textContent.trim();
+        if (text.length < 2) continue;
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) continue;
+        if (cells[ci].querySelector("a")) continue;
+        category = text;
+        break;
+      }
+
+      const urlClientId = clientId || new URLSearchParams(location.search).get("ESOLclientid") || "";
+      if (!fileUrl) {
+        fileUrl = `${location.origin}/common/web/controllers/viewfile.xhtml?fileId=${fileId}&clientId=${urlClientId}&fileMetadataName=${encodeURIComponent(storedName || displayName)}`;
+      }
+
+      files.push({
+        fileId,
+        clientId: urlClientId,
+        storedName: storedName || displayName,
+        displayName,
+        effectiveDate: dateMatch,
+        category,
+        url: fileUrl,
+      });
+
+      if (files.length >= 50) break;
+    }
+
+    const totalFound = files.length;
+
+    // Sort by effective date (MM/DD/YYYY) descending, then keep only latest 10
+    const toTime = (dateStr) => {
+      const m = (dateStr || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (!m) return 0;
+      const mm = parseInt(m[1], 10) - 1;
+      const dd = parseInt(m[2], 10);
+      const yy = parseInt(m[3], 10);
+      return new Date(yy, mm, dd).getTime() || 0;
+    };
+
+    const sorted = files.slice().sort((a, b) => toTime(b.effectiveDate) - toTime(a.effectiveDate));
+    const latest = sorted.slice(0, 10);
+
+    chrome.storage.session.set({
+      pdfScanDiag: `${diagCounts} -> found:${totalFound}${totalFound > latest.length ? ` showing:${latest.length}` : ""}`,
+    });
+
+    if (latest.length === 0) return;
+
+    chrome.storage.session.set({ pdfFileList: latest });
+
+    // Auto-open side panel only on the dedicated filesdisplay page
+    if (location.pathname.includes("filesdisplay")) {
+      chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
+    }
+
+    // Persist to PCCScribe web app (fire-and-forget)
+    const pccClientId = latest[0]?.clientId;
+    if (pccClientId) {
+      chrome.runtime.sendMessage({ type: "SAVE_FILES", files: latest, pccClientId });
+    }
+  }
+
+  // ─── Init ────────────────────────────────────────────────────────────────────
+  //
+  // content.js runs in ALL frames (all_frames: true in manifest).
+  // In sub-frames (PCC tab iframes): only run the file scanner — no FAB or panel.
+  // In the top frame: run the full init.
+
+  const IS_TOP_FRAME = window.self === window.top;
+
+  if (!IS_TOP_FRAME) {
+    // ── Sub-frame: only scan for uploaded files ──────────────────────────────
+    const runSubframeScan = () => { scanUploadedFiles(); setTimeout(scanUploadedFiles, 1200); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", runSubframeScan);
+    else runSubframeScan();
+
+    // Also re-scan when the top frame asks (user clicked Files tab)
+    chrome.storage.session.onChanged.addListener((changes) => {
+      if (changes.triggerFileScan) scanUploadedFiles();
+    });
+  } else {
+    // ── Top frame: full init ─────────────────────────────────────────────────
+    function init() { createFAB(); createPanel(); initPdfInterceptor(); scanUploadedFiles(); }
+    setTimeout(scanUploadedFiles, 1200);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
+  }
+})();

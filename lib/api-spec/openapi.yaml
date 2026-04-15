@@ -1,0 +1,967 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: PCCScribe API - Clinical note summarization platform
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: patients
+    description: Patient management
+  - name: notes
+    description: Clinical notes management
+  - name: summaries
+    description: AI-generated clinical summaries
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /patients:
+    get:
+      operationId: listPatients
+      tags: [patients]
+      summary: List all patients
+      responses:
+        "200":
+          description: List of patients
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Patient"
+    post:
+      operationId: createPatient
+      tags: [patients]
+      summary: Create a patient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePatientBody"
+      responses:
+        "201":
+          description: Patient created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Patient"
+
+  /patients/sync:
+    post:
+      operationId: syncPatient
+      tags: [patients]
+      summary: Upsert patient by PCC internal ID
+      description: >
+        Creates a new patient or updates an existing one matched by pccInternalId.
+        Called automatically by the browser extension on each patient page visit to
+        keep vitals, allergies, and clinical data current without manual input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePatientBody"
+      responses:
+        "200":
+          description: Existing patient updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPatientResponse"
+        "201":
+          description: New patient created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPatientResponse"
+        "400":
+          description: Validation error (pccInternalId required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /patients/{patientId}:
+    get:
+      operationId: getPatient
+      tags: [patients]
+      summary: Get patient by ID
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Patient details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Patient"
+        "404":
+          description: Patient not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updatePatient
+      tags: [patients]
+      summary: Update patient details
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePatientBody"
+      responses:
+        "200":
+          description: Patient updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Patient"
+    delete:
+      operationId: deletePatient
+      tags: [patients]
+      summary: Delete a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Patient deleted
+
+  /patients/{patientId}/notes:
+    get:
+      operationId: listPatientNotes
+      tags: [notes]
+      summary: List notes for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClinicalNote"
+    post:
+      operationId: createPatientNotes
+      tags: [notes]
+      summary: Ingest notes for a patient (from extension or manual)
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestNotesBody"
+      responses:
+        "201":
+          description: Notes ingested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inserted:
+                    type: integer
+                  noteIds:
+                    type: array
+                    items:
+                      type: integer
+                required:
+                  - inserted
+                  - noteIds
+
+  /patients/{patientId}/notes/{noteId}:
+    delete:
+      operationId: deleteNote
+      tags: [notes]
+      summary: Delete a note
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: noteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Note deleted
+
+  /patients/{patientId}/summaries:
+    get:
+      operationId: listPatientSummaries
+      tags: [summaries]
+      summary: List summaries for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Summary"
+
+  /patients/{patientId}/summaries/generate:
+    post:
+      operationId: generateSummary
+      tags: [summaries]
+      summary: Generate AI summary for a patient's notes
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateSummaryBody"
+      responses:
+        "201":
+          description: Summary generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Summary"
+        "400":
+          description: Not enough notes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /patients/{patientId}/summaries/{summaryId}:
+    get:
+      operationId: getSummary
+      tags: [summaries]
+      summary: Get a specific summary
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: summaryId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Summary details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Summary"
+        "404":
+          description: Summary not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSummary
+      tags: [summaries]
+      summary: Delete a summary
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: summaryId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Summary deleted
+
+  /patients/{patientId}/files:
+    get:
+      operationId: listPatientFiles
+      tags: [files]
+      summary: List uploaded files for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of uploaded files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PccUploadedFile"
+    post:
+      operationId: savePatientFiles
+      tags: [files]
+      summary: Bulk upsert uploaded files for a patient
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFilesBody"
+      responses:
+        "201":
+          description: Files saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  saved:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PccUploadedFile"
+                required:
+                  - saved
+                  - files
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    PccUploadedFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        pccFileId:
+          type: string
+        pccClientId:
+          type: string
+        storedName:
+          type: string
+        displayName:
+          type: string
+        effectiveDate:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        fileUrl:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - patientId
+        - pccFileId
+        - pccClientId
+        - storedName
+        - displayName
+        - fileUrl
+        - createdAt
+        - updatedAt
+
+    SaveFilesBody:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              fileId:
+                type: string
+              clientId:
+                type: string
+              storedName:
+                type: string
+              displayName:
+                type: string
+              effectiveDate:
+                type: string
+              category:
+                type: string
+              url:
+                type: string
+            required:
+              - fileId
+              - clientId
+              - storedName
+              - displayName
+              - url
+      required:
+        - files
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+
+    SyncPatientResponse:
+      type: object
+      properties:
+        patient:
+          $ref: "#/components/schemas/Patient"
+        created:
+          type: boolean
+          description: true if a new record was created, false if an existing one was updated
+      required:
+        - patient
+        - created
+
+    Patient:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        age:
+          type: integer
+        facilityName:
+          type: string
+        unit:
+          type: string
+        mrn:
+          type: string
+          nullable: true
+        admissionDate:
+          type: string
+          nullable: true
+        primaryDiagnosis:
+          type: string
+          nullable: true
+        nickname:
+          type: string
+          nullable: true
+        dateOfBirth:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          nullable: true
+        pccInternalId:
+          type: string
+          nullable: true
+        admissionStatus:
+          type: string
+          nullable: true
+        physician:
+          type: string
+          nullable: true
+        allergies:
+          type: string
+          nullable: true
+        codeStatus:
+          type: string
+          nullable: true
+        specialInstructions:
+          type: string
+          nullable: true
+        diet:
+          type: string
+          nullable: true
+        initialAdmissionDate:
+          type: string
+          nullable: true
+        enterpriseId:
+          type: string
+          nullable: true
+        currentVitals:
+          type: string
+          nullable: true
+          description: JSON string of current vitals object
+        emergencyContact:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - age
+        - facilityName
+        - unit
+        - createdAt
+        - updatedAt
+
+    CreatePatientBody:
+      type: object
+      properties:
+        name:
+          type: string
+        age:
+          type: integer
+        facilityName:
+          type: string
+        unit:
+          type: string
+        mrn:
+          type: string
+          nullable: true
+        admissionDate:
+          type: string
+          nullable: true
+        primaryDiagnosis:
+          type: string
+          nullable: true
+        nickname:
+          type: string
+          nullable: true
+        dateOfBirth:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          nullable: true
+        pccInternalId:
+          type: string
+          nullable: true
+        admissionStatus:
+          type: string
+          nullable: true
+        physician:
+          type: string
+          nullable: true
+        allergies:
+          type: string
+          nullable: true
+        codeStatus:
+          type: string
+          nullable: true
+        specialInstructions:
+          type: string
+          nullable: true
+        diet:
+          type: string
+          nullable: true
+        initialAdmissionDate:
+          type: string
+          nullable: true
+        enterpriseId:
+          type: string
+          nullable: true
+        currentVitals:
+          type: string
+          nullable: true
+          description: JSON string of current vitals object
+        emergencyContact:
+          type: string
+          nullable: true
+      required:
+        - name
+        - age
+        - facilityName
+        - unit
+
+    ClinicalNote:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        noteType:
+          type: string
+          enum:
+            - progress_notes
+            - physician_orders
+            - mds_assessment
+            - care_plan
+            - mar
+            - nursing_notes
+            - therapy_notes
+            - dietary_notes
+            - social_work_notes
+            - other
+        noteDate:
+          type: string
+        author:
+          type: string
+          nullable: true
+        content:
+          type: string
+        sourceUrl:
+          type: string
+          nullable: true
+        printUrl:
+          type: string
+          nullable: true
+          description: Direct URL to the PCC print/full-view page for this note
+        noteTypePcc:
+          type: string
+          nullable: true
+          description: Original PCC note type label (e.g. "Nurse Practitioner Narrative/Physician Assistant")
+        createdAt:
+          type: string
+      required:
+        - id
+        - patientId
+        - noteType
+        - noteDate
+        - content
+        - createdAt
+
+    IngestNotesBody:
+      type: object
+      properties:
+        notes:
+          type: array
+          items:
+            type: object
+            properties:
+              noteType:
+                type: string
+                enum:
+                  - progress_notes
+                  - physician_orders
+                  - mds_assessment
+                  - care_plan
+                  - mar
+                  - nursing_notes
+                  - therapy_notes
+                  - dietary_notes
+                  - social_work_notes
+                  - other
+              noteDate:
+                type: string
+              author:
+                type: string
+                nullable: true
+              content:
+                type: string
+              sourceUrl:
+                type: string
+                nullable: true
+              printUrl:
+                type: string
+                nullable: true
+                description: URL of the PCC print view for this note
+              noteTypePcc:
+                type: string
+                nullable: true
+                description: Original PCC note type label verbatim
+            required:
+              - noteType
+              - noteDate
+              - content
+        source:
+          type: string
+          enum:
+            - extension
+            - manual
+          default: manual
+      required:
+        - notes
+
+    Summary:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        dateFrom:
+          type: string
+        dateTo:
+          type: string
+        noteTypesIncluded:
+          type: array
+          items:
+            type: string
+        notesCount:
+          type: integer
+        status:
+          type: string
+          enum:
+            - pending
+            - generating
+            - completed
+            - failed
+        confidence:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+          nullable: true
+        oneLiner:
+          type: string
+          nullable: true
+        soapSummary:
+          nullable: true
+          type: object
+          properties:
+            subjective:
+              type: object
+              properties:
+                narrative:
+                  type: string
+                patientReportedSymptoms:
+                  type: array
+                  items:
+                    type: string
+                familyConcernsDocumented:
+                  type: array
+                  items:
+                    type: string
+                painReported:
+                  type: boolean
+                painScaleReported:
+                  type: string
+                  nullable: true
+                moodAffect:
+                  type: string
+                  nullable: true
+                dataSufficiency:
+                  type: string
+              required:
+                - narrative
+                - patientReportedSymptoms
+                - familyConcernsDocumented
+                - painReported
+                - dataSufficiency
+            objective:
+              type: object
+              properties:
+                narrative:
+                  type: string
+                keyFindings:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      finding:
+                        type: string
+                      source:
+                        type: string
+                    required:
+                      - finding
+                      - source
+                vitalsTrend:
+                  type: string
+                  nullable: true
+                functionalStatus:
+                  type: string
+                  nullable: true
+                dataSufficiency:
+                  type: string
+              required:
+                - narrative
+                - keyFindings
+                - dataSufficiency
+            assessment:
+              type: object
+              properties:
+                narrative:
+                  type: string
+                activeDiagnoses:
+                  type: array
+                  items:
+                    type: string
+                clinicalTrajectory:
+                  type: string
+                  nullable: true
+                riskFlags:
+                  type: array
+                  items:
+                    type: string
+                dataSufficiency:
+                  type: string
+              required:
+                - narrative
+                - activeDiagnoses
+                - riskFlags
+                - dataSufficiency
+            plan:
+              type: object
+              properties:
+                narrative:
+                  type: string
+                activeOrders:
+                  type: array
+                  items:
+                    type: string
+                pendingActions:
+                  type: array
+                  items:
+                    type: string
+                followUpItems:
+                  type: array
+                  items:
+                    type: string
+                dataSufficiency:
+                  type: string
+              required:
+                - narrative
+                - activeOrders
+                - pendingActions
+                - followUpItems
+                - dataSufficiency
+          required:
+            - subjective
+            - objective
+            - assessment
+            - plan
+        perNoteTypeSummaries:
+          nullable: true
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              confidence:
+                type: string
+              summary:
+                type: string
+              notesCount:
+                type: integer
+              keyPoints:
+                type: array
+                items:
+                  type: string
+            required:
+              - confidence
+              - summary
+              - notesCount
+              - keyPoints
+        keyClinicalEvents:
+          nullable: true
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+              event:
+                type: string
+              significance:
+                type: string
+                enum:
+                  - high
+                  - medium
+                  - low
+            required:
+              - date
+              - event
+              - significance
+        documentationGaps:
+          nullable: true
+          type: array
+          items:
+            type: string
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - patientId
+        - dateFrom
+        - dateTo
+        - noteTypesIncluded
+        - notesCount
+        - status
+        - createdAt
+        - updatedAt
+
+    GenerateSummaryBody:
+      type: object
+      properties:
+        dateFrom:
+          type: string
+          description: Start date for notes to include (YYYY-MM-DD)
+        dateTo:
+          type: string
+          description: End date for notes to include (YYYY-MM-DD)
+        noteTypes:
+          type: array
+          items:
+            type: string
+          description: Filter to specific note types. Empty means all.
+      required:
+        - dateFrom
+        - dateTo

@@ -1634,7 +1634,7 @@
 
   // ─── Uploaded Files scanner ───────────────────────────────────────────────────
   // Scans any PCC page with openFile() anchors or viewfile.xhtml links (filesdisplay,
-  // Misc tab, etc.), extracts up to 15 PDFs, and stores them in session storage.
+  // Misc tab, etc.), extracts latest 10 PDFs, and stores them in session storage.
 
   function scanUploadedFiles() {
     // ── Three strategies to find PCC uploaded file links ─────────────────────
@@ -1755,14 +1755,31 @@
         url: fileUrl,
       });
 
-      if (files.length >= 15) break;
+      if (files.length >= 50) break;
     }
 
-    chrome.storage.session.set({ pdfScanDiag: `${diagCounts} → found:${files.length}` });
+    const totalFound = files.length;
 
-    if (files.length === 0) return;
+    // Sort by effective date (MM/DD/YYYY) descending, then keep only latest 10
+    const toTime = (dateStr) => {
+      const m = (dateStr || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (!m) return 0;
+      const mm = parseInt(m[1], 10) - 1;
+      const dd = parseInt(m[2], 10);
+      const yy = parseInt(m[3], 10);
+      return new Date(yy, mm, dd).getTime() || 0;
+    };
 
-    chrome.storage.session.set({ pdfFileList: files });
+    const sorted = files.slice().sort((a, b) => toTime(b.effectiveDate) - toTime(a.effectiveDate));
+    const latest = sorted.slice(0, 10);
+
+    chrome.storage.session.set({
+      pdfScanDiag: `${diagCounts} -> found:${totalFound}${totalFound > latest.length ? ` showing:${latest.length}` : ""}`,
+    });
+
+    if (latest.length === 0) return;
+
+    chrome.storage.session.set({ pdfFileList: latest });
 
     // Auto-open side panel only on the dedicated filesdisplay page
     if (location.pathname.includes("filesdisplay")) {
@@ -1770,9 +1787,9 @@
     }
 
     // Persist to PCCScribe web app (fire-and-forget)
-    const pccClientId = files[0]?.clientId;
+    const pccClientId = latest[0]?.clientId;
     if (pccClientId) {
-      chrome.runtime.sendMessage({ type: "SAVE_FILES", files, pccClientId });
+      chrome.runtime.sendMessage({ type: "SAVE_FILES", files: latest, pccClientId });
     }
   }
 

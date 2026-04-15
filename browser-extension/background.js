@@ -488,7 +488,7 @@ function scanFrameForFiles() {
     }
 
     files.push({ fileId, clientId: urlClientId, storedName: storedName || displayName, displayName, effectiveDate: dateMatch, category, url: fileUrl });
-    if (files.length >= 20) break;
+    if (files.length >= 50) break;
   }
 
   // Also return diagnostic info so the caller knows what was tried
@@ -521,12 +521,28 @@ async function handleScanForFiles(sender) {
     }
 
     const diagString = diagParts.join(" ") || "no frames";
+    const totalFound = allFiles.length;
+
+    const toTime = (dateStr) => {
+      const m = (dateStr || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (!m) return 0;
+      const mm = parseInt(m[1], 10) - 1;
+      const dd = parseInt(m[2], 10);
+      const yy = parseInt(m[3], 10);
+      return new Date(yy, mm, dd).getTime() || 0;
+    };
+
+    const latest = allFiles
+      .slice()
+      .sort((a, b) => toTime(b.effectiveDate) - toTime(a.effectiveDate))
+      .slice(0, 10);
+
     await chrome.storage.session.set({
-      pdfScanDiag: `${diagString} → found:${allFiles.length}`,
-      ...(allFiles.length > 0 ? { pdfFileList: allFiles } : {}),
+      pdfScanDiag: `${diagString} -> found:${totalFound}${totalFound > latest.length ? ` showing:${latest.length}` : ""}`,
+      ...(latest.length > 0 ? { pdfFileList: latest } : {}),
     });
 
-    return { files: allFiles, diag: diagString };
+    return { files: latest, diag: diagString };
   } catch (err) {
     return { files: [], error: err.message };
   }

@@ -157,7 +157,9 @@ function showFileList(files) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const idx = parseInt(btn.dataset.idx);
-      openFileEntry(files[idx]);
+      const file = files[idx];
+      if (!file?.url) return;
+      chrome.tabs.create({ url: file.url, active: true });
     });
   });
 
